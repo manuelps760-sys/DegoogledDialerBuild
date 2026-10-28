@@ -805,7 +805,7 @@ class SystemPathwaysActivity : AppCompatActivity() {
         addSection("Developer / debugging status")
         val devEnabled = readGlobal(Settings.Global.DEVELOPMENT_SETTINGS_ENABLED)
         val adbEnabled = readGlobal(Settings.Global.ADB_ENABLED)
-        val oemUnlock = readGlobal(Settings.Global.OEM_UNLOCK_ENABLED)
+        val oemUnlock = readGlobal("oem_unlock_enabled")
         addText("Developer options: " + status(devEnabled) + "\nUSB debugging setting: " + status(adbEnabled) + "\nOEM unlock setting: " + status(oemUnlock), 15f)
         addText("These are read-only status checks. An ordinary app cannot turn on USB debugging, bypass device policy, unlock the bootloader, or generate privileged bug reports by itself.", 14f)
         addButton("Refresh Android-reported status") { recreate() }
