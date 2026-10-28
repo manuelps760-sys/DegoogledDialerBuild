@@ -107,7 +107,7 @@ class _DialerHomeState extends State<DialerHome> {
           ? 'Call request sent using ${_selectedAccountLabel()}. Check the system call screen.'
           : 'Opened Android dialer. Confirm the SIM and tap Call there.');
     } on PlatformException catch (e) {
-      if (mounted) setState(() => status = 'Call request failed: ${e.message ?? e.code}');
+      if (mounted) { setState(() => status = 'Call request failed: ${e.message ?? e.code}'); }
     }
   }
 
