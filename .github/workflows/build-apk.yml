@@ -203,6 +203,61 @@ jobs:
               }''')
           p.write_text(s)
           PY
+      - name: Add real Android dialer role and Telecom declarations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          manifest = Path("source/app/src/main/AndroidManifest.xml")
+          s = manifest.read_text()
+          # A default dialer must handle ACTION_DIAL with tel: URIs and expose an InCallService.
+          s = s.replace('''                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>''', '''                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="tel" />
+            </intent-filter>''', 1)
+          service = '''        <service
+            android:name=".CustomInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="true">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>'''
+          s = re.sub(r'        <service\s+android:name="\.CustomInCallService".*?</service>', service, s, flags=re.S)
+          manifest.write_text(s)
+
+          main = Path("source/app/src/main/java/org/degoogled/dialer/MainActivity.kt")
+          s = main.read_text()
+          if "import android.app.role.RoleManager" not in s:
+              s = s.replace("import android.content.Intent", "import android.app.role.RoleManager\nimport android.content.Intent\nimport android.os.Build")
+          if "requestDialerRoleIfNeeded()" not in s:
+              s = s.replace("        setContentView(R.layout.activity_main)", "        setContentView(R.layout.activity_main)\n        requestDialerRoleIfNeeded()")
+              method = '''
+          private fun requestDialerRoleIfNeeded() {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                  val roleManager = getSystemService(RoleManager::class.java) ?: return
+                  if (roleManager.isRoleAvailable(RoleManager.ROLE_DIALER) &&
+                      !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                      startActivityForResult(
+                          roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER),
+                          703
+                      )
+                  }
+              }
+          }
+
+          '''
+              s = s.replace("    private fun setupKeypad() {", method + "    private fun setupKeypad() {")
+          main.write_text(s)
+          PY
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
