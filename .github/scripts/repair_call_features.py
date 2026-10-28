@@ -143,7 +143,8 @@ if "requestDefaultDialerRole" not in s:
 
 """
     s = s.replace("    override fun onNewIntent(intent: Intent) {", method + "    override fun onNewIntent(intent: Intent) {", 1)
-    # Normalize imports after patching, avoiding duplicate Kotlin imports on rebuilds.\n    main.write_text('\\n'.join(dict.fromkeys(s.splitlines()) ) + '\\n')\n
+    # Normalize imports after patching, avoiding duplicate Kotlin imports on rebuilds.
+    main.write_text('\n'.join(dict.fromkeys(s.splitlines())) + '\n')
 m = manifest.read_text()
 if "CallActionReceiver" not in m:
     m = m.replace("        <!-- Native AOSP Telecom InCallService -->", '        <receiver android:name=".CallActionReceiver" android:exported="false" />\n\n        <!-- Native AOSP Telecom InCallService -->')
