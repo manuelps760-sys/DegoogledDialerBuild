@@ -39,7 +39,11 @@ class _DialerHomeState extends State<DialerHome> {
   bool defaultDialer = false;
   bool loadingAccounts = false;
   List<Map<String, dynamic>> accounts = [];
+  List<Map<String, dynamic>> contacts = [];
+  List<Map<String, dynamic>> callHistory = [];
   String? selectedAccountId;
+  bool loadingContacts = false;
+  bool loadingHistory = false;
 
   @override
   void initState() {
@@ -77,6 +81,94 @@ class _DialerHomeState extends State<DialerHome> {
       }); }
     }
   }
+
+  Future<void> _loadContacts() async {
+    setState(() => loadingContacts = true);
+    try {
+      final granted = await platform.invokeMethod<bool>('requestContactsPermission') ?? false;
+      if (!granted) {
+        if (mounted) setState(() { loadingContacts = false; status = 'Allow contacts permission, then tap refresh.'; });
+        return;
+      }
+      final raw = await platform.invokeMethod<List<dynamic>>('getContacts');
+      if (mounted) setState(() {
+        contacts = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        loadingContacts = false;
+      });
+    } on PlatformException catch (e) {
+      if (mounted) setState(() { loadingContacts = false; status = e.message ?? e.code; });
+    }
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() => loadingHistory = true);
+    try {
+      final granted = await platform.invokeMethod<bool>('requestCallLogPermission') ?? false;
+      if (!granted) {
+        if (mounted) setState(() { loadingHistory = false; status = 'Allow call history permission, then tap refresh.'; });
+        return;
+      }
+      final raw = await platform.invokeMethod<List<dynamic>>('getCallHistory');
+      if (mounted) setState(() {
+        callHistory = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        loadingHistory = false;
+      });
+    } on PlatformException catch (e) {
+      if (mounted) setState(() { loadingHistory = false; status = e.message ?? e.code; });
+    }
+  }
+
+  void _dialThis(String value) {
+    number.text = value;
+    number.selection = TextSelection.collapsed(offset: number.text.length);
+    setState(() => tab = 0);
+  }
+
+  Widget _contactsPage() => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      Row(children: [
+        Expanded(child: Text('Contacts', style: Theme.of(context).textTheme.titleLarge)),
+        IconButton(onPressed: loadingContacts ? null : _loadContacts, icon: const Icon(Icons.refresh), tooltip: 'Load contacts'),
+      ]),
+      if (loadingContacts) const LinearProgressIndicator(),
+      if (contacts.isEmpty && !loadingContacts)
+        const Padding(padding: EdgeInsets.all(20), child: Text('Tap refresh to grant permission and load contacts.')),
+      ...contacts.map((contact) => ListTile(
+        leading: const CircleAvatar(child: Icon(Icons.person)),
+        title: Text(contact['name']?.toString().isNotEmpty == true ? contact['name'].toString() : 'Unknown contact'),
+        subtitle: Text(contact['number']?.toString() ?? ''),
+        onTap: () => _dialThis(contact['number']?.toString() ?? ''),
+        trailing: IconButton(icon: const Icon(Icons.call), onPressed: () => _dialThis(contact['number']?.toString() ?? '')),
+      )),
+    ],
+  );
+
+  Widget _historyPage() => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      Row(children: [
+        Expanded(child: Text('Recent calls', style: Theme.of(context).textTheme.titleLarge)),
+        IconButton(onPressed: loadingHistory ? null : _loadHistory, icon: const Icon(Icons.refresh), tooltip: 'Load call history'),
+      ]),
+      if (loadingHistory) const LinearProgressIndicator(),
+      if (callHistory.isEmpty && !loadingHistory)
+        const Padding(padding: EdgeInsets.all(20), child: Text('Tap refresh to grant permission and load recent calls.')),
+      ...callHistory.map((entry) {
+        final type = int.tryParse(entry['type']?.toString() ?? '') ?? 0;
+        final icon = type == 1 ? Icons.call_received : type == 2 ? Icons.call_made : Icons.call_missed;
+        final date = DateTime.fromMillisecondsSinceEpoch(int.tryParse(entry['date']?.toString() ?? '') ?? 0);
+        final name = entry['name']?.toString() ?? '';
+        return ListTile(
+          leading: Icon(icon),
+          title: Text(name.isNotEmpty ? name : (entry['number']?.toString() ?? 'Unknown')),
+          subtitle: Text('${entry['number'] ?? ''} • ${date.toLocal()}'),
+          onTap: () => _dialThis(entry['number']?.toString() ?? ''),
+          trailing: IconButton(icon: const Icon(Icons.call), onPressed: () => _dialThis(entry['number']?.toString() ?? '')),
+        );
+      }),
+    ],
+  );
 
   Future<void> _chooseDefault() async {
     try {
@@ -253,6 +345,8 @@ class _DialerHomeState extends State<DialerHome> {
     ),
     body: SafeArea(child: IndexedStack(index: tab, children: [
       SingleChildScrollView(padding: const EdgeInsets.all(18), child: _dialPad()),
+      _contactsPage(),
+      _historyPage(),
       _phoneSettings(),
       _sipPage(),
     ])),
@@ -261,6 +355,8 @@ class _DialerHomeState extends State<DialerHome> {
       onDestinationSelected: (i) => setState(() => tab = i),
       destinations: const [
         NavigationDestination(icon: Icon(Icons.dialpad), label: 'Dial pad'),
+        NavigationDestination(icon: Icon(Icons.contacts), label: 'Contacts'),
+        NavigationDestination(icon: Icon(Icons.history), label: 'Recents'),
         NavigationDestination(icon: Icon(Icons.settings_phone), label: 'Phone'),
         NavigationDestination(icon: Icon(Icons.public), label: 'SIP / VoIP'),
       ],
