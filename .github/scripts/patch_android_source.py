@@ -627,3 +627,35 @@ r = r.replace('''        isStreaming = false
         isEncryptedSrtp = false
         rtpSocket?.close()''')
 rtp.write_text(r)
+
+# Normalize generated SDP parsing without fragile Kotlin regex escape sequences.
+sip = base / "sip/SipClient.kt"
+lines = sip.read_text().splitlines()
+fixed = []
+for line in lines:
+    if 'val remoteIp = Regex(' in line:
+        fixed.append('                val remoteIp = sdp.lineSequence().firstOrNull { it.startsWith("c=IN IP4 ") }?.substringAfter("c=IN IP4 ")?.trim() ?: sipServer')
+    elif 'val remotePort = Regex(' in line:
+        fixed.append('                val remotePort = sdp.lineSequence().firstOrNull { it.startsWith("m=audio ") }?.split(" ")?.getOrNull(1)?.toIntOrNull()')
+    else:
+        fixed.append(line)
+sip.write_text("\n".join(fixed) + "\n")
+
+rtp = base / "rtp/RtpAudioEngine.kt"
+r = rtp.read_text()
+r = r.replace('fun startAudio(remoteIp: String, remoteRtpPort: Int, codecPt: Int, enableSrtp: Boolean = false)', 'fun startAudio(remoteIp: String, remoteRtpPort: Int, localRtpPort: Int, codecPt: Int, enableSrtp: Boolean = false)')
+r = r.replace('rtpSocket = DatagramSocket(10000)', 'rtpSocket = DatagramSocket(localRtpPort)')
+r = r.replace('''        if (isStreaming) return
+        isStreaming = true
+        isEncryptedSrtp = enableSrtp''', '''        if (isStreaming) stopAudio()
+        if (enableSrtp) {
+            Log.e("RtpAudioEngine", "SRTP is not implemented safely; refusing fake-key encryption")
+            return
+        }
+        isStreaming = true
+        isEncryptedSrtp = false''')
+r = r.replace('''        isStreaming = false
+        rtpSocket?.close()''', '''        isStreaming = false
+        isEncryptedSrtp = false
+        rtpSocket?.close()''')
+rtp.write_text(r)
