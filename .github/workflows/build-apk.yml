@@ -50,6 +50,16 @@ jobs:
           XML
             fi
           fi
+          # Add color resources referenced by layouts if the source archive omitted them.
+          if [ -n "$appdir" ]; then
+            mkdir -p "$appdir/src/main/res/values"
+            cat > "$appdir/src/main/res/values/build-fallback-colors.xml" <<'XML'
+          <resources>
+              <color name="white">#FFFFFFFF</color>
+              <color name="call_green">#FF2EAD62</color>
+          </resources>
+          XML
+          fi
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
