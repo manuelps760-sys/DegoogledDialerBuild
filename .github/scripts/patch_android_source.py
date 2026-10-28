@@ -734,3 +734,23 @@ insert = '''
 if 'private fun ulawToLinear' not in r:
     r = r.replace('    private fun linearToUlaw(pcm: Int): Byte {', insert + '    private fun linearToUlaw(pcm: Int): Byte {')
 rtp.write_text(r)
+
+
+// Final guard: fail the APK build if the SIP/RTP voice-effects path is missing.
+sip_final = (base / "sip/SipClient.kt").read_text()
+rtp_final = (base / "rtp/RtpAudioEngine.kt").read_text()
+voice_final = (base / "VoiceChanger.kt").read_text()
+required_media_markers = {
+    "SIP negotiated local RTP port": "currentRtpPort",
+    "SIP starts RTP with negotiated endpoints": "startAudio(remoteIp, remotePort, currentRtpPort",
+    "outgoing microphone passes through voice effect": "VoiceChanger.processPcm",
+    "incoming RTP receive path": "RTP-Receive",
+    "G.711 mu-law receive decoder": "ulawToLinear",
+    "G.711 A-law receive decoder": "alawToLinear",
+    "voice effect modes": "ANONYMIZER",
+}
+combined_media_source = sip_final + "\\n" + rtp_final + "\\n" + voice_final
+missing_media = [label for label, marker in required_media_markers.items() if marker not in combined_media_source]
+if missing_media:
+    raise SystemExit("VoIP voice changer integration check failed: " + ", ".join(missing_media))
+print("Validated SIP/RTP voice-effects integration markers.")
