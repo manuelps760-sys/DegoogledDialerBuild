@@ -736,7 +736,7 @@ if 'private fun ulawToLinear' not in r:
 rtp.write_text(r)
 
 
-// Final guard: fail the APK build if the SIP/RTP voice-effects path is missing.
+# Final guard: fail the APK build if the SIP/RTP voice-effects path is missing.
 sip_final = (base / "sip/SipClient.kt").read_text()
 rtp_final = (base / "rtp/RtpAudioEngine.kt").read_text()
 voice_final = (base / "VoiceChanger.kt").read_text()
