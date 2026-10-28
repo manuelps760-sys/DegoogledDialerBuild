@@ -194,7 +194,7 @@ d = d.replace("# Default Secure RTP payload encryption", "// SRTP is experimenta
 d = d.replace("var useSrtp: Boolean = true", "var useSrtp: Boolean = false")
 debug.write_text(d)
 
-radio.write_text("""package org.degoogled.dialer
+radio.write_text(r"""package org.degoogled.dialer
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -245,6 +245,19 @@ class RadioDiagnosticsActivity : AppCompatActivity() {
 """)
 
 m = manifest.read_text()
+# Declare only capabilities used by the dialer; Android still enforces role and runtime consent.
+permissions = [
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+    "android.permission.WAKE_LOCK",
+    "android.permission.READ_CONTACTS",
+    "android.permission.READ_CALL_LOG",
+    "android.permission.WRITE_CALL_LOG",
+    "android.permission.ANSWER_PHONE_CALLS",
+]
+for permission in permissions:
+    line = f'    <uses-permission android:name="{permission}" />'
+    if line not in m:
+        m = m.replace("</manifest>", line + "\\n</manifest>")
 if "android.permission.MODIFY_AUDIO_SETTINGS" not in m:
     m = m.replace('<uses-permission android:name="android.permission.RECORD_AUDIO" />',
         '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />')
