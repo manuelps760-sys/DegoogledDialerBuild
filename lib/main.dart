@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sip_ua/sip_ua.dart';
 
 void main() => runApp(const DegoogledDialerApp());
 
@@ -32,10 +33,23 @@ class _DialerHomeState extends State<DialerHome> {
   static const platform = MethodChannel('org.degoogled.dialer/phone');
   final number = TextEditingController();
   final sipUser = TextEditingController();
+  final sipPassword = TextEditingController();
   final sipServer = TextEditingController();
+  final sipWebSocket = TextEditingController();
+  final sipTarget = TextEditingController();
+  final SIPUAHelper sipHelper = SIPUAHelper();
+  Call? activeSipCall;
+  bool sipConnecting = false;
+  bool sipRegistered = false;
+  bool sipIncoming = false;
+  late final _SipCallbacks sipCallbacks = _SipCallbacks(
+    onCall: _onSipCallState,
+    onRegistration: _onSipRegistration,
+    onTransport: _onSipTransport,
+  );
   int tab = 0;
   String status = 'Ready. Test a call before relying on this app.';
-  String sipStatus = 'SIP calling is not implemented in this build.';
+  String sipStatus = 'Enter your SIP provider details to register.';
   bool defaultDialer = false;
   bool loadingAccounts = false;
   List<Map<String, dynamic>> accounts = [];
@@ -50,6 +64,7 @@ class _DialerHomeState extends State<DialerHome> {
     super.initState();
     _refreshRole();
     _loadPhoneAccounts();
+    sipHelper.addSipUaHelperListener(sipCallbacks);
   }
 
   Future<void> _refreshRole() async {
@@ -287,6 +302,154 @@ class _DialerHomeState extends State<DialerHome> {
     ]);
   }
 
+  void _onSipRegistration(RegistrationState state) {
+    if (!mounted) return;
+    setState(() {
+      sipRegistered = state.state == RegistrationStateEnum.REGISTERED;
+      sipStatus = 'SIP registration: ${state.state?.name ?? 'unknown'}${state.cause == null ? '' : ' — ${state.cause}'}';
+    });
+  }
+
+  void _onSipTransport(TransportState state) {
+    if (!mounted) return;
+    setState(() {
+      if (state.state == TransportStateEnum.DISCONNECTED) {
+        sipRegistered = false;
+      }
+      if (!sipRegistered) {
+        sipStatus = 'SIP transport: ${state.state.name}${state.cause == null ? '' : ' — ${state.cause}'}';
+      }
+    });
+  }
+
+  void _onSipCallState(Call call, CallState state) {
+    if (!mounted) return;
+    setState(() {
+      if (state.state == CallStateEnum.ENDED || state.state == CallStateEnum.FAILED) {
+        activeSipCall = null;
+        sipIncoming = false;
+        sipStatus = state.state == CallStateEnum.FAILED
+            ? 'SIP call failed: ${state.cause ?? 'check server, credentials, and audio settings'}'
+            : 'SIP call ended.';
+      } else {
+        activeSipCall = call;
+        sipIncoming = call.direction == Direction.INCOMING &&
+            state.state != CallStateEnum.CONFIRMED &&
+            state.state != CallStateEnum.ACCEPTED &&
+            state.state != CallStateEnum.STREAM;
+        sipStatus = 'SIP call: ${state.state.name}';
+      }
+    });
+  }
+
+  Future<void> _connectSip() async {
+    final user = sipUser.text.trim();
+    final domain = sipServer.text.trim();
+    final wsUrl = sipWebSocket.text.trim();
+    final password = sipPassword.text;
+    if (user.isEmpty || domain.isEmpty || password.isEmpty || wsUrl.isEmpty) {
+      setState(() => sipStatus = 'Enter SIP username, password, SIP domain, and WebSocket URL.');
+      return;
+    }
+    final ws = Uri.tryParse(wsUrl);
+    if (ws == null || (ws.scheme != 'wss' && ws.scheme != 'ws') || ws.host.isEmpty) {
+      setState(() => sipStatus = 'WebSocket URL must be a valid ws:// or wss:// address. Prefer wss:// for encrypted signaling.');
+      return;
+    }
+    if (ws.scheme != 'wss') {
+      setState(() => sipStatus = 'Use wss:// for encrypted SIP signaling. Plain ws:// is disabled for safety.');
+      return;
+    }
+    setState(() {
+      sipConnecting = true;
+      sipStatus = 'Connecting to SIP server…';
+    });
+    try {
+      final settings = UaSettings()
+        ..webSocketUrl = wsUrl
+        ..uri = 'sip:$user@$domain'
+        ..authorizationUser = user
+        ..password = password
+        ..displayName = user
+        ..userAgent = 'DegoogledDialer/1.0'
+        ..register = true;
+      await sipHelper.start(settings);
+      sipHelper.register();
+      if (mounted) setState(() {
+        sipConnecting = false;
+        sipStatus = 'SIP transport started. Waiting for server registration response…';
+      });
+    } catch (e) {
+      if (mounted) setState(() {
+        sipConnecting = false;
+        sipRegistered = false;
+        sipStatus = 'SIP connection failed: $e';
+      });
+    }
+  }
+
+  Future<void> _disconnectSip() async {
+    try {
+      activeSipCall?.hangup();
+      await sipHelper.unregister();
+      sipHelper.stop();
+    } catch (_) {
+      sipHelper.stop();
+    }
+    if (mounted) setState(() {
+      activeSipCall = null;
+      sipIncoming = false;
+      sipRegistered = false;
+      sipConnecting = false;
+      sipStatus = 'Disconnected from SIP.';
+    });
+  }
+
+  Future<void> _makeSipCall() async {
+    if (!sipRegistered) {
+      setState(() => sipStatus = 'Register with your SIP provider before placing a VoIP call.');
+      return;
+    }
+    final target = sipTarget.text.trim();
+    if (target.isEmpty) {
+      setState(() => sipStatus = 'Enter the SIP extension or full SIP URI to call.');
+      return;
+    }
+    final uri = target.startsWith('sip:') || target.startsWith('sips:')
+        ? target
+        : 'sip:$target@${sipServer.text.trim()}';
+    try {
+      setState(() => sipStatus = 'Calling $uri…');
+      final ok = await sipHelper.call(uri, voiceOnly: true);
+      if (!ok && mounted) setState(() => sipStatus = 'SIP call could not be started. Check the target and server logs.');
+    } catch (e) {
+      if (mounted) setState(() => sipStatus = 'SIP call failed to start: $e');
+    }
+  }
+
+  void _answerSipCall() {
+    final call = activeSipCall;
+    if (call == null) return;
+    try {
+      call.answer(sipHelper.buildCallOptions(true));
+      setState(() {
+        sipIncoming = false;
+        sipStatus = 'Answering SIP call…';
+      });
+    } catch (e) {
+      setState(() => sipStatus = 'Could not answer SIP call: $e');
+    }
+  }
+
+  void _hangupSipCall() {
+    try {
+      activeSipCall?.hangup();
+      setState(() => sipStatus = 'Ending SIP call…');
+    } catch (e) {
+      setState(() => sipStatus = 'Could not end SIP call: $e');
+    }
+  }
+
   Widget _phoneSettings() => ListView(padding: const EdgeInsets.all(18), children: [
     const Icon(Icons.phone_android, size: 48),
     const SizedBox(height: 10),
@@ -316,28 +479,60 @@ class _DialerHomeState extends State<DialerHome> {
     const SizedBox(height: 10),
     Text('SIP / VoIP', style: Theme.of(context).textTheme.titleLarge),
     const SizedBox(height: 8),
-    const Text('SIP registration, SIP signaling, incoming VoIP calls, codecs, and two-way audio are not implemented yet. This screen does not claim a false connection.'),
+    const Text('Uses SIP over secure WebSocket (WSS) and WebRTC audio. You need an account and a provider/PBX that supports WebSocket SIP and DTLS-SRTP.'),
     const SizedBox(height: 16),
-    TextField(controller: sipUser, decoration: const InputDecoration(labelText: 'SIP username', border: OutlineInputBorder())),
+    TextField(controller: sipUser, autocorrect: false, decoration: const InputDecoration(labelText: 'SIP username / auth ID', border: OutlineInputBorder())),
     const SizedBox(height: 12),
-    TextField(controller: sipServer, decoration: const InputDecoration(labelText: 'SIP server / domain', border: OutlineInputBorder())),
+    TextField(controller: sipPassword, obscureText: true, autocorrect: false, decoration: const InputDecoration(labelText: 'SIP password', border: OutlineInputBorder())),
     const SizedBox(height: 12),
-    FilledButton.icon(
-      onPressed: () => setState(() => sipStatus = 'Not connected: SIP engine is not included yet. Credentials have not been sent.'),
-      icon: const Icon(Icons.info_outline),
-      label: const Text('Check SIP readiness'),
+    TextField(controller: sipServer, autocorrect: false, decoration: const InputDecoration(labelText: 'SIP domain / registrar', hintText: 'pbx.example.com', border: OutlineInputBorder())),
+    const SizedBox(height: 12),
+    TextField(controller: sipWebSocket, autocorrect: false, keyboardType: TextInputType.url, decoration: const InputDecoration(labelText: 'Secure WebSocket URL', hintText: 'wss://pbx.example.com:8089/ws', border: OutlineInputBorder())),
+    const SizedBox(height: 12),
+    Row(children: [
+      Expanded(child: FilledButton.icon(
+        onPressed: sipConnecting || sipRegistered ? null : _connectSip,
+        icon: const Icon(Icons.login),
+        label: Text(sipConnecting ? 'Connecting…' : 'Register'),
+      )),
+      const SizedBox(width: 8),
+      Expanded(child: OutlinedButton.icon(
+        onPressed: sipConnecting || (!sipRegistered && !sipHelper.connected) ? null : _disconnectSip,
+        icon: const Icon(Icons.logout),
+        label: const Text('Disconnect'),
+      )),
+    ]),
+    const SizedBox(height: 8),
+    ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(sipRegistered ? Icons.verified : Icons.info_outline, color: sipRegistered ? Colors.green : null),
+      title: Text(sipRegistered ? 'Registered with SIP provider' : 'Not registered'),
+      subtitle: Text(sipStatus),
     ),
+    const Divider(),
+    TextField(controller: sipTarget, autocorrect: false, decoration: const InputDecoration(labelText: 'Extension / SIP URI to call', hintText: '1001 or sip:1001@pbx.example.com', border: OutlineInputBorder())),
     const SizedBox(height: 12),
-    Text(sipStatus),
-    const SizedBox(height: 16),
-    const Text('SIP requires a maintained SIP signaling and media stack, plus testing for authentication, NAT traversal, audio routing, and secure media.'),
+    FilledButton.icon(onPressed: sipRegistered && activeSipCall == null ? _makeSipCall : null, icon: const Icon(Icons.call), label: const Text('Place VoIP call')),
+    if (activeSipCall != null) ...[
+      const SizedBox(height: 12),
+      Text('Call state: ${activeSipCall!.state.name}'),
+      if (sipIncoming) FilledButton.icon(onPressed: _answerSipCall, icon: const Icon(Icons.call), label: const Text('Answer incoming VoIP call')),
+      OutlinedButton.icon(onPressed: _hangupSipCall, icon: const Icon(Icons.call_end), label: const Text('Hang up VoIP call')),
+    ],
+    const SizedBox(height: 12),
+    const Text('Credentials stay on this device and are passed to the SIP library for registration. SIP providers differ; successful registration and two-way audio depend on your provider configuration. Do not share your SIP password in chat.'),
   ]);
 
   @override
   void dispose() {
     number.dispose();
+    sipHelper.removeSipUaHelperListener(sipCallbacks);
+    sipHelper.stop();
     sipUser.dispose();
+    sipPassword.dispose();
     sipServer.dispose();
+    sipWebSocket.dispose();
+    sipTarget.dispose();
     super.dispose();
   }
 
@@ -366,4 +561,34 @@ class _DialerHomeState extends State<DialerHome> {
       ],
     ),
   );
+}
+
+class _SipCallbacks extends SipUaHelperListener {
+  _SipCallbacks({
+    required this.onCall,
+    required this.onRegistration,
+    required this.onTransport,
+  });
+
+  final void Function(Call call, CallState state) onCall;
+  final void Function(RegistrationState state) onRegistration;
+  final void Function(TransportState state) onTransport;
+
+  @override
+  void callStateChanged(Call call, CallState state) => onCall(call, state);
+
+  @override
+  void registrationStateChanged(RegistrationState state) => onRegistration(state);
+
+  @override
+  void transportStateChanged(TransportState state) => onTransport(state);
+
+  @override
+  void onNewMessage(SIPMessageRequest msg) {}
+
+  @override
+  void onNewNotify(Notify ntf) {}
+
+  @override
+  void onNewReinvite(ReInvite event) {}
 }
