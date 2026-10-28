@@ -263,7 +263,7 @@ if 'android:scheme="tel"' not in m:
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>'''
     if needle in m:
-        m = m.replace(needle, needle + "\\n" + dial_filter, 1)
+        m = m.replace(needle, needle + "\n" + dial_filter, 1)
 service_needle = '''        <service
             android:name=".CustomInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
@@ -288,9 +288,9 @@ manifest.write_text(m)
 
 main_text = main.read_text()
 if "import android.app.role.RoleManager" not in main_text:
-    main_text = main_text.replace("import android.Manifest", "import android.Manifest\\nimport android.app.role.RoleManager\\nimport android.os.Build", 1)
+    main_text = main_text.replace("import android.Manifest", "import android.Manifest\nimport android.app.role.RoleManager\nimport android.os.Build", 1)
 if "requestDialerRoleIfNeeded()" not in main_text:
-    main_text = main_text.replace("        setContentView(R.layout.activity_main)", "        setContentView(R.layout.activity_main)\\n        requestDialerRoleIfNeeded()", 1)
+    main_text = main_text.replace("        setContentView(R.layout.activity_main)", "        setContentView(R.layout.activity_main)\n        requestDialerRoleIfNeeded()", 1)
     role_method = '''
     private fun requestDialerRoleIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
