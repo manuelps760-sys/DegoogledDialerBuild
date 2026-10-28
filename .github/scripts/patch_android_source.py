@@ -843,60 +843,23 @@ class SystemPathwaysActivity : AppCompatActivity() {
 }
 ''')
 
-# Replace the previous external-app shortcuts with one in-app pathway entry.
+# Add one in-app entry point to the pathway screen.
 main_text = main.read_text()
-old = """        // Native system tools: these open Android-owned screens; they do not silently enable admin rights.
-        val systemTools = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(12, 8, 12, 8)
+needle = """        findViewById<Button>(R.id.btnLaunchRadioDiag).setOnClickListener {
+            startActivity(Intent(this, RadioDiagnosticsActivity::class.java))
         }
-        fun addSystemTool(label: String, action: () -> Unit) {
-            val button = Button(this).apply {
-                text = label
-                setOnClickListener { action() }
-            }
-            systemTools.addView(button, android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ))
-        }
-        addSystemTool("Open Phone / Dialer") {
-            try {
-                startActivity(Intent(Intent.ACTION_DIAL))
-            } catch (_: Exception) {
-                Toast.makeText(this, "No dialer app is available.", Toast.LENGTH_LONG).show()
-            }
-        }
-        addSystemTool("Device Admin / Enterprise Settings") {
-            try {
-                startActivity(Intent("android.settings.DEVICE_ADMIN_SETTINGS"))
-            } catch (_: Exception) {
-                try { startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) }
-                catch (_: Exception) {
-                    Toast.makeText(this, "Device administration settings are unavailable on this device.", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-        addSystemTool("Native Android Developer Options") {
-            try {
-                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-            } catch (_: Exception) {
-                Toast.makeText(this, "Developer Options is unavailable or restricted by device policy.", Toast.LENGTH_LONG).show()
-            }
-        }
-        val contentRoot = findViewById<android.view.ViewGroup>(android.R.id.content)
-        contentRoot.addView(systemTools)
 """
-new = """        // In-app pathways: do not delegate the phone UI to a preinstalled dialer or vendor app.
+pathway_button = needle + """
         val pathwaysButton = Button(this).apply {
             text = "Device Admin / Developer Pathways"
             setOnClickListener { startActivity(Intent(this@MainActivity, SystemPathwaysActivity::class.java)) }
         }
         findViewById<android.view.ViewGroup>(android.R.id.content).addView(pathwaysButton)
 """
-if old not in main_text:
-    raise SystemExit("Could not locate old external-app shortcut block in generated MainActivity.")
-main.write_text(main_text.replace(old, new, 1))
+if needle not in main_text:
+    raise SystemExit("Could not find the MainActivity diagnostics-button insertion point.")
+if "Device Admin / Developer Pathways" not in main_text:
+    main.write_text(main_text.replace(needle, pathway_button, 1))
 
 # Register the app-owned pathway screen in AndroidManifest.xml.
 m = manifest.read_text()
