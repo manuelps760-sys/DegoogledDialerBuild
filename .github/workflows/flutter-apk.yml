@@ -18,6 +18,7 @@ jobs:
       - name: Generate Android wrapper and local Flutter configuration
         run: |
           flutter create --platforms=android --project-name degoogled_dialer --org org.degoogled --no-pub .
+          sed -i 's#^distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-all.zip#' android/gradle/wrapper/gradle-wrapper.properties
           printf "flutter.sdk=%s\\n" "$FLUTTER_ROOT" > android/local.properties
           rm -f test/widget_test.dart
       - name: Verify Flutter project
