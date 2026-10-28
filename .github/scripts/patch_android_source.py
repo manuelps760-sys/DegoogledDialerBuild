@@ -247,15 +247,36 @@ class RadioDiagnosticsActivity : AppCompatActivity() {
 m = manifest.read_text()
 # Declare only capabilities used by the dialer; Android still enforces role and runtime consent.
 permissions = [
+    # Calling, Telecom, contact and call-history integration.
     "android.permission.MODIFY_AUDIO_SETTINGS",
     "android.permission.WAKE_LOCK",
+    "android.permission.VIBRATE",
     "android.permission.READ_CONTACTS",
     "android.permission.READ_CALL_LOG",
     "android.permission.WRITE_CALL_LOG",
     "android.permission.ANSWER_PHONE_CALLS",
+    "android.permission.READ_PHONE_NUMBERS",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    # VoIP foreground audio and notification behavior.
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+    "android.permission.POST_NOTIFICATIONS",
+    # Bluetooth headset routing (Android 12+).
+    "android.permission.BLUETOOTH_CONNECT",
 ]
 for permission in permissions:
     line = f'    <uses-permission android:name="{permission}" />'
+    if line not in m:
+        m = m.replace("</manifest>", line + "\n</manifest>")
+# Legacy Bluetooth and storage permissions are capped to old Android versions.
+legacy_permissions = [
+    ('android.permission.BLUETOOTH', 30),
+    ('android.permission.BLUETOOTH_ADMIN', 30),
+    ('android.permission.READ_EXTERNAL_STORAGE', 32),
+    ('android.permission.WRITE_EXTERNAL_STORAGE', 28),
+]
+for permission, max_sdk in legacy_permissions:
+    line = f'    <uses-permission android:name="{permission}" android:maxSdkVersion="{max_sdk}" />'
     if line not in m:
         m = m.replace("</manifest>", line + "\n</manifest>")
 if "android.permission.MODIFY_AUDIO_SETTINGS" not in m:
