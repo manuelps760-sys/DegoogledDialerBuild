@@ -257,7 +257,7 @@ permissions = [
 for permission in permissions:
     line = f'    <uses-permission android:name="{permission}" />'
     if line not in m:
-        m = m.replace("</manifest>", line + "\\n</manifest>")
+        m = m.replace("</manifest>", line + "\n</manifest>")
 if "android.permission.MODIFY_AUDIO_SETTINGS" not in m:
     m = m.replace('<uses-permission android:name="android.permission.RECORD_AUDIO" />',
         '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />')
