@@ -250,4 +250,63 @@ if "android.permission.MODIFY_AUDIO_SETTINGS" not in m:
         '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />')
 manifest.write_text(m)
 
+
+# Register as a genuine Android dialer candidate; role approval remains user-controlled.
+m = manifest.read_text()
+dial_filter = '''            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="tel" />
+            </intent-filter>'''
+if 'android:scheme="tel"' not in m:
+    needle = '''                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>'''
+    if needle in m:
+        m = m.replace(needle, needle + "\\n" + dial_filter, 1)
+service_needle = '''        <service
+            android:name=".CustomInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>'''
+service_real = '''        <service
+            android:name=".CustomInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="true">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>'''
+if service_needle in m:
+    m = m.replace(service_needle, service_real, 1)
+manifest.write_text(m)
+
+main_text = main.read_text()
+if "import android.app.role.RoleManager" not in main_text:
+    main_text = main_text.replace("import android.Manifest", "import android.Manifest\\nimport android.app.role.RoleManager\\nimport android.os.Build", 1)
+if "requestDialerRoleIfNeeded()" not in main_text:
+    main_text = main_text.replace("        setContentView(R.layout.activity_main)", "        setContentView(R.layout.activity_main)\\n        requestDialerRoleIfNeeded()", 1)
+    role_method = '''
+    private fun requestDialerRoleIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java) ?: return
+            if (roleManager.isRoleAvailable(RoleManager.ROLE_DIALER) &&
+                !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                startActivityForResult(
+                    roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER),
+                    703
+                )
+            }
+        }
+    }
+
+'''
+    main_text = main_text.replace("    private fun setupKeypad() {", role_method + "    private fun setupKeypad() {", 1)
+main.write_text(main_text)
+
 print("Source improvements applied.")
