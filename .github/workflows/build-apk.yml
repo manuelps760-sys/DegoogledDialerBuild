@@ -9,8 +9,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Extract Android source archive
+        run: |
+          mkdir -p source
+          unzip -oq degoogled-dialer-app-v5.zip -d source
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -21,15 +25,23 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
       - name: Build debug APK
+        shell: bash
         run: |
-          if [ -f ./gradlew ]; then
+          set -e
+          wrapper="$(find source -type f -name gradlew -print -quit)"
+          if [ -n "$wrapper" ]; then
+            project_dir="$(dirname "$wrapper")"
+            cd "$project_dir"
             chmod +x ./gradlew
             ./gradlew --no-daemon assembleDebug
-          elif [ -f ./build.gradle.kts ] || [ -f ./build.gradle ]; then
-            gradle --no-daemon assembleDebug
           else
-            echo "No Gradle project found at repository root. Upload/extract the Android project source first."
-            exit 1
+            build_file="$(find source -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit)"
+            if [ -z "$build_file" ]; then
+              echo "No Gradle build files found in the uploaded ZIP."
+              exit 1
+            fi
+            cd "$(dirname "$build_file")"
+            gradle --no-daemon assembleDebug
           fi
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
