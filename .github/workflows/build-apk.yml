@@ -23,6 +23,33 @@ jobs:
           else
             printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > source/gradle.properties
           fi
+          # Supply minimal resources referenced by the manifest if the archive omitted them.
+          appdir="$(find source -type f -name AndroidManifest.xml -path '*/app/src/main/*' -print -quit | sed 's#/src/main/AndroidManifest.xml##')"
+          if [ -n "$appdir" ]; then
+            res="$appdir/src/main/res"
+            mkdir -p "$res/mipmap-anydpi" "$res/values"
+            if ! find "$res" -type f \( -name 'ic_launcher.png' -o -name 'ic_launcher.xml' -o -name 'ic_launcher.webp' \) | grep -q .; then
+              cat > "$res/mipmap-anydpi/ic_launcher.xml" <<'XML'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+              <path android:fillColor="#2457C5" android:pathData="M0,0h48v48h-48z"/>
+              <path android:fillColor="#FFFFFF" android:pathData="M15,7h18a3,3 0,0 1,3 3v28a3,3 0,0 1,-3 3h-18a3,3 0,0 1,-3 -3v-28a3,3 0,0 1,3 -3z M17,12v24h14v-24z"/>
+              <path android:fillColor="#FFFFFF" android:pathData="M20,17h8v3h-8z M20,23h8v3h-8z M20,29h8v3h-8z"/>
+          </vector>
+          XML
+            fi
+            if ! grep -Rqs 'name="AppTheme"' "$res/values" 2>/dev/null; then
+              cat > "$res/values/styles.xml" <<'XML'
+          <resources>
+              <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="colorPrimary">#2457C5</item>
+                  <item name="colorPrimaryVariant">#163A8A</item>
+                  <item name="colorOnPrimary">#FFFFFF</item>
+                  <item name="colorSecondary">#03DAC5</item>
+              </style>
+          </resources>
+          XML
+            fi
+          fi
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
