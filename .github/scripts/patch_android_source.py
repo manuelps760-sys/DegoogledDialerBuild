@@ -2,6 +2,27 @@ from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+
+# Give this rebuild a distinct package ID so it installs beside older signed
+# copies instead of failing Android's package/signature conflict check.
+gradle_files = list((root / "app").glob("build.gradle")) + list((root / "app").glob("build.gradle.kts"))
+if not gradle_files:
+    raise SystemExit("Could not find app Gradle configuration to set the install package ID.")
+for gradle_file in gradle_files:
+    gradle_text = gradle_file.read_text()
+    import re
+    gradle_text, replacements = re.subn(
+        r'(applicationId\\s*(?:=\\s*)?["\'])[^"\']+(["\'])',
+        r'\\g<1>org.degoogled.dialer.v2\\g<2>',
+        gradle_text,
+        count=1
+    )
+    if replacements:
+        gradle_file.write_text(gradle_text)
+        print("Set side-by-side install package ID to org.degoogled.dialer.v2")
+        break
+else:
+    raise SystemExit("Could not locate applicationId in app Gradle configuration.")
 base = root / "app/src/main/java/org/degoogled/dialer"
 main = base / "MainActivity.kt"
 sip = base / "sip/SipClient.kt"
