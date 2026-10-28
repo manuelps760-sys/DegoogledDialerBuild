@@ -12,8 +12,8 @@ for gradle_file in gradle_files:
     gradle_text = gradle_file.read_text()
     import re
     gradle_text, replacements = re.subn(
-        r'(applicationId\\s*(?:=\\s*)?["\'])[^"\']+(["\'])',
-        r'\\g<1>org.degoogled.dialer.v2\\g<2>',
+        r'(applicationId\s*(?:=\s*)?["\'])[^"\']+(["\'])',
+        r'\g<1>org.degoogled.dialer.v2\g<2>',
         gradle_text,
         count=1
     )
@@ -602,7 +602,7 @@ s = s.replace('useTls = SipDebugManager.useTls, useSrtp = SipDebugManager.useSrt
 s = s.replace('''                // Start Encrypted SRTP / RTP Media Audio Stream
                 RtpAudioEngine.startAudio(sipServer, 10002, SipDebugManager.selectedCodecPayloadType, SipDebugManager.useSrtp)
                 handler.post { onCallConnected?.invoke() }''', '''                val sdp = msg.substringAfter("\\r\\n\\r\\n", "")
-                val remoteIp = Regex("(?m)^c=IN IP4 ([^\\s\\r]+)").find(sdp)?.groupValues?.get(1) ?: sipServer
+                val remoteIp = Regex("(?m)^c=IN IP4 ([^\s\\r]+)").find(sdp)?.groupValues?.get(1) ?: sipServer
                 val remotePort = Regex("(?m)^m=audio (\\d+) ").find(sdp)?.groupValues?.get(1)?.toIntOrNull()
                 if (remotePort == null || currentRtpPort == 0) {
                     notifyStatus("Call answered, but no usable RTP endpoint was found in SDP.")
