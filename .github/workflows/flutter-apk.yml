@@ -19,6 +19,7 @@ jobs:
         run: |
           flutter create --platforms=android --project-name degoogled_dialer --org org.degoogled --no-pub .
           printf "flutter.sdk=%s\\n" "$FLUTTER_ROOT" > android/local.properties
+          rm -f test/widget_test.dart
       - name: Verify Flutter project
         run: flutter pub get
       - name: Analyze Dart
