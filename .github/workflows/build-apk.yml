@@ -21,6 +21,7 @@ jobs:
         run: |
           python3 .github/scripts/patch_android_source.py source
           python3 .github/scripts/complete_dialer.py source
+          python3 .github/scripts/repair_call_features.py source
           find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
           printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > source/gradle.properties
           appdir=source/app
