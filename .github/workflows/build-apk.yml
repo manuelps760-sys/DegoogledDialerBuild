@@ -11,10 +11,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Extract Android source archive
-        run: |
-          mkdir -p source
-          unzip -oq degoogled-dialer-app-v5.zip -d source
+      - name: Extract Android source
+        run: unzip -oq degoogled-dialer-app-v5.zip -d source
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -37,7 +35,7 @@ jobs:
           else
             build_file="$(find source -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit)"
             if [ -z "$build_file" ]; then
-              echo "No Gradle build files found in the uploaded ZIP."
+              echo "No Gradle build files found in degoogled-dialer-app-v5.zip"
               exit 1
             fi
             cd "$(dirname "$build_file")"
