@@ -14,6 +14,10 @@ jobs:
       - name: Extract and patch Android source
         run: |
           unzip -oq degoogled-dialer-app-v5.zip -d source
+          # Fix Kotlin compile errors in the supplied source archive.
+          sed -i 's/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled, SipDebugManager.tlsEnabled)/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)/' source/app/src/main/java/org/degoogled/dialer/MainActivity.kt
+          sed -i 's/# Default SIPS over TLS/\/\/ Default SIPS over TLS/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
+          sed -i 's/# Default Secure RTP payload encryption/\/\/ Default Secure RTP payload encryption/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
           # Correct the invalid Gradle RepositoriesMode enum used in the source archive.
           find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
           # Enable AndroidX for the AndroidX dependencies used by the app.
