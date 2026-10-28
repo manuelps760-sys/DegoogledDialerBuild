@@ -11,8 +11,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Extract Android source
-        run: unzip -oq degoogled-dialer-app-v5.zip -d source
+      - name: Extract and patch Android source
+        run: |
+          unzip -oq degoogled-dialer-app-v5.zip -d source
+          # Correct the invalid Gradle RepositoriesMode enum used in the source archive.
+          find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
