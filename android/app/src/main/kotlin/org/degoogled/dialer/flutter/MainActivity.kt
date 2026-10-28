@@ -2,6 +2,9 @@ package org.degoogled.dialer.flutter
 
 import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.CallLog
+import android.provider.ContactsContract
 import android.net.Uri
 import android.os.Build
 import android.telecom.PhoneAccountHandle
@@ -41,6 +44,77 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         pendingRoleResult = null
                         result.error("ROLE_REQUEST_FAILED", e.message, null)
+                    }
+                }
+                "requestContactsPermission" -> {
+                    if (checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+                        result.success(true)
+                    } else {
+                        requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 705)
+                        result.success(false)
+                    }
+                }
+                "getContacts" -> {
+                    if (checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                        result.error("CONTACTS_PERMISSION", "Grant contacts permission first, then retry.", null)
+                    } else {
+                        try {
+                            val rows = mutableListOf<Map<String, String>>()
+                            contentResolver.query(
+                                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                                null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE ASC"
+                            )?.use { cursor ->
+                                val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                                val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                                while (cursor.moveToNext() && rows.size < 1000) {
+                                    rows.add(mapOf("name" to cursor.getString(nameCol).orEmpty(), "number" to cursor.getString(numberCol).orEmpty()))
+                                }
+                            }
+                            result.success(rows)
+                        } catch (e: Exception) {
+                            result.error("CONTACTS_READ_FAILED", e.message, null)
+                        }
+                    }
+                }
+                "requestCallLogPermission" -> {
+                    if (checkSelfPermission(android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED) {
+                        result.success(true)
+                    } else {
+                        requestPermissions(arrayOf(android.Manifest.permission.READ_CALL_LOG), 706)
+                        result.success(false)
+                    }
+                }
+                "getCallHistory" -> {
+                    if (checkSelfPermission(android.Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+                        result.error("CALL_LOG_PERMISSION", "Grant call history permission first, then retry.", null)
+                    } else {
+                        try {
+                            val rows = mutableListOf<Map<String, String>>()
+                            contentResolver.query(
+                                CallLog.Calls.CONTENT_URI,
+                                arrayOf(CallLog.Calls.CACHED_NAME, CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION),
+                                null, null, CallLog.Calls.DATE + " DESC"
+                            )?.use { cursor ->
+                                val nameCol = cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
+                                val numberCol = cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
+                                val typeCol = cursor.getColumnIndexOrThrow(CallLog.Calls.TYPE)
+                                val dateCol = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
+                                val durationCol = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
+                                while (cursor.moveToNext() && rows.size < 200) {
+                                    rows.add(mapOf(
+                                        "name" to cursor.getString(nameCol).orEmpty(),
+                                        "number" to cursor.getString(numberCol).orEmpty(),
+                                        "type" to cursor.getInt(typeCol).toString(),
+                                        "date" to cursor.getLong(dateCol).toString(),
+                                        "duration" to cursor.getLong(durationCol).toString()
+                                    ))
+                                }
+                            }
+                            result.success(rows)
+                        } catch (e: Exception) {
+                            result.error("CALL_LOG_READ_FAILED", e.message, null)
+                        }
                     }
                 }
                 "getPhoneAccounts" -> {
