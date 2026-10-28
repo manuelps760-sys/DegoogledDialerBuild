@@ -116,6 +116,93 @@ jobs:
           </resources>
           XML
           fi
+          # Improve the app source after extracting the uploaded v5 ZIP.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("source/app/src/main/java/org/degoogled/dialer/MainActivity.kt")
+          s = p.read_text()
+          s = s.replace("import android.content.Intent", "import android.Manifest\nimport android.content.Intent\nimport android.content.pm.PackageManager\nimport android.net.Uri")
+          s = s.replace("    private var sipClient: SipClient? = null", "    private var sipClient: SipClient? = null\n    private var sipRegistered = false\n    private var pendingCellularNumber: String? = null")
+          s = s.replace("        etDisplay = findViewById(R.id.etNumberDisplay)", "        etDisplay = findViewById(R.id.etNumberDisplay)\n        if (intent?.action == Intent.ACTION_DIAL) intent.data?.schemeSpecificPart?.let { etDisplay.setText(it) }")
+          s = s.replace('''                tvSipStatus.text = "Status: $status"''', '''                tvSipStatus.text = "Status: $status"\n                sipRegistered = status.startsWith("Registered")''')
+          s = s.replace('''            val server = etSipServer.text.toString()
+                      val user = etSipUser.text.toString()
+                      val pass = etSipPass.text.toString()
+
+                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''', '''            val server = etSipServer.text.toString().trim()
+                      val user = etSipUser.text.toString().trim()
+                      val pass = etSipPass.text.toString()
+                      if (server.isBlank() || user.isBlank() || pass.isBlank()) {
+                          Toast.makeText(this, "Enter your SIP server, username, and password first.", Toast.LENGTH_LONG).show()
+                          return@setOnClickListener
+                      }
+                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''')
+          s = s.replace('''            sipClient?.makeCall(target, SipDebugManager.selectedCodecPayloadType)''', '''            if (sipRegistered) {
+                          sipClient?.makeCall(target, SipDebugManager.selectedCodecPayloadType)
+                      } else {
+                          pendingCellularNumber = target
+                          if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                              placeCellularCall(target)
+                          } else {
+                              requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), 702)
+                          }
+                      }''')
+          s = s.replace('''            Toast.makeText(this, "IMEI: 869403049182301 / 869403049182302", Toast.LENGTH_LONG).show()''', '''            Toast.makeText(this, "Open Android Settings → About phone for your real device identifier. This app does not invent IMEI values.", Toast.LENGTH_LONG).show()''')
+          insert = '''
+          private fun placeCellularCall(number: String) {
+              try {
+                  startActivity(Intent(Intent.ACTION_CALL, Uri.fromParts("tel", number, null)))
+              } catch (_: Exception) {
+                  Toast.makeText(this, "Could not start a cellular call. Check call permission and your phone service.", Toast.LENGTH_LONG).show()
+              }
+              pendingCellularNumber = null
+          }
+
+          @Deprecated("Deprecated API retained for device compatibility")
+          override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+              super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+              if (requestCode == 702) {
+                  val number = pendingCellularNumber
+                  if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED && !number.isNullOrBlank()) {
+                      placeCellularCall(number)
+                  } else {
+                      Toast.makeText(this, "Call permission was not granted.", Toast.LENGTH_LONG).show()
+                  }
+              }
+          }
+
+          '''
+          s = s.replace("    private fun setupKeypad() {", insert + "    private fun setupKeypad() {")
+          p.write_text(s)
+          p = Path("source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt")
+          s = p.read_text().replace("var pcapEnabled: Boolean = true", "var pcapEnabled: Boolean = false")
+          s = s.replace("# Default SIPS over TLS", "// Default SIPS over TLS").replace("# Default Secure RTP payload encryption", "// SRTP is experimental; do not enable by default")
+          s = s.replace("var useSrtp: Boolean = true", "var useSrtp: Boolean = false")
+          p.write_text(s)
+          p = Path("source/app/src/main/java/org/degoogled/dialer/sip/SipClient.kt")
+          s = p.read_text().replace('var sipServer: String = "192.168.1.100"', 'var sipServer: String = ""').replace('var sipUser: String = "101"', 'var sipUser: String = ""').replace('var sipPass: String = "secret123"', 'var sipPass: String = ""')
+          s = s.replace("import java.net.InetAddress", "import java.net.InetAddress\nimport java.net.Inet4Address\nimport java.net.NetworkInterface")
+          s = s.replace('''    private fun getLocalIpAddress(): String {
+                  return "127.0.0.1"
+              }''', '''    private fun getLocalIpAddress(): String {
+                  return try {
+                      val interfaces = NetworkInterface.getNetworkInterfaces()
+                      while (interfaces.hasMoreElements()) {
+                          val iface = interfaces.nextElement()
+                          if (!iface.isUp || iface.isLoopback) continue
+                          val addresses = iface.inetAddresses
+                          while (addresses.hasMoreElements()) {
+                              val address = addresses.nextElement()
+                              if (address is Inet4Address && !address.isLoopbackAddress && !address.isLinkLocalAddress) {
+                                  return address.hostAddress ?: "0.0.0.0"
+                              }
+                          }
+                      }
+                      "0.0.0.0"
+                  } catch (_: Exception) { "0.0.0.0" }
+              }''')
+          p.write_text(s)
+          PY
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
