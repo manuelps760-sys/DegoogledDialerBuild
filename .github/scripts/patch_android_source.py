@@ -565,3 +565,9 @@ rt = rt.replace("fun startAudio(remoteIp: String, remoteRtpPort: Int, codecPt: I
 rt = rt.replace("var jitterMs = 1.8f", "var jitterMs = 0.0f")
 rt = rt.replace("var packetLossPct = 0.0f", "var packetLossPct = 0.0f")
 rtp.write_text(rt)
+
+# Expose current media state to the in-call status screen.
+rtp = base / "rtp/RtpAudioEngine.kt"
+rt = rtp.read_text()
+rt = rt.replace("private var isStreaming = false", "var isStreaming: Boolean = false\n        private set")
+rtp.write_text(rt)
