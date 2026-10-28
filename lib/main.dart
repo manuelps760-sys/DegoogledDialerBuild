@@ -91,10 +91,12 @@ class _DialerHomeState extends State<DialerHome> {
         return;
       }
       final raw = await platform.invokeMethod<List<dynamic>>('getContacts');
-      if (mounted) setState(() {
-        contacts = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-        loadingContacts = false;
-      });
+      if (mounted) {
+        setState(() {
+          contacts = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+          loadingContacts = false;
+        });
+      }
     } on PlatformException catch (e) {
       if (mounted) setState(() { loadingContacts = false; status = e.message ?? e.code; });
     }
@@ -109,10 +111,12 @@ class _DialerHomeState extends State<DialerHome> {
         return;
       }
       final raw = await platform.invokeMethod<List<dynamic>>('getCallHistory');
-      if (mounted) setState(() {
-        callHistory = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-        loadingHistory = false;
-      });
+      if (mounted) {
+        setState(() {
+          callHistory = (raw ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+          loadingHistory = false;
+        });
+      }
     } on PlatformException catch (e) {
       if (mounted) setState(() { loadingHistory = false; status = e.message ?? e.code; });
     }
