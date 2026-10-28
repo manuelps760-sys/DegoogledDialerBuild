@@ -344,3 +344,224 @@ if "requestDialerRoleIfNeeded()" not in main_text:
 main.write_text(main_text)
 
 print("Source improvements applied.")
+
+
+# Wire carrier-call controls to Android Telecom instead of UI-only toggles.
+service = base / "CustomInCallService.kt"
+service.write_text(r'''package org.degoogled.dialer
+
+import android.content.Intent
+import android.telecom.Call
+import android.telecom.InCallService
+import android.util.Log
+
+class CustomInCallService : InCallService() {
+    override fun onCallAdded(call: Call) {
+        super.onCallAdded(call)
+        activeCall = call
+        call.registerCallback(object : Call.Callback() {
+            override fun onStateChanged(call: Call, state: Int) {
+                Log.d("InCallService", "Call state=" + state)
+                if (state == Call.STATE_DISCONNECTED && activeCall === call) activeCall = null
+            }
+        })
+        try {
+            startActivity(Intent(this, InCallActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        } catch (e: Exception) {
+            Log.w("InCallService", "Unable to launch in-call screen", e)
+        }
+    }
+    override fun onCallRemoved(call: Call) {
+        if (activeCall === call) activeCall = null
+        super.onCallRemoved(call)
+    }
+    companion object {
+        @Volatile var activeCall: Call? = null
+    }
+}
+''')
+
+incall = base / "InCallActivity.kt"
+incall.write_text(r'''package org.degoogled.dialer
+
+import android.media.AudioManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.telecom.Call
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import org.degoogled.dialer.rtp.RtpAudioEngine
+
+class InCallActivity : AppCompatActivity() {
+    private lateinit var metrics: TextView
+    private lateinit var record: Button
+    private lateinit var mute: Button
+    private lateinit var speaker: Button
+    private lateinit var normal: Button
+    private lateinit var deep: Button
+    private lateinit var helium: Button
+    private lateinit var robot: Button
+    private lateinit var anon: Button
+    private val handler = Handler(Looper.getMainLooper())
+    private var updating = false
+    private var recording = false
+    private var muted = false
+    private var speakerOn = false
+    private var recorder: CallRecorder? = null
+    private val audio by lazy { getSystemService(AUDIO_SERVICE) as AudioManager }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_incall)
+        metrics = findViewById(R.id.tvRtpMetrics)
+        record = findViewById(R.id.btnRecordCall)
+        mute = findViewById(R.id.btnMuteCall)
+        speaker = findViewById(R.id.btnSpeakerCall)
+        normal = findViewById(R.id.btnVoiceNormal)
+        deep = findViewById(R.id.btnVoiceDeep)
+        helium = findViewById(R.id.btnVoiceHelium)
+        robot = findViewById(R.id.btnVoiceRobot)
+        anon = findViewById(R.id.btnVoiceAnon)
+        recorder = CallRecorder(this)
+        setupEffects()
+
+        record.setOnClickListener {
+            if (CustomInCallService.activeCall != null) {
+                Toast.makeText(this, "Android does not expose carrier-call audio to this recorder.", Toast.LENGTH_LONG).show()
+            } else if (!recording) {
+                try {
+                    recorder?.startRecording("voip-mic")
+                    recording = true
+                    record.text = "Stop Recording"
+                    Toast.makeText(this, "Microphone recording started. Obtain any required consent.", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Recording unavailable: " + e.message, Toast.LENGTH_LONG).show()
+                }
+            } else {
+                val file = recorder?.stopRecording()
+                recording = false
+                record.text = "Record Mic"
+                Toast.makeText(this, "Saved: " + (file?.name ?: "recording stopped"), Toast.LENGTH_LONG).show()
+            }
+        }
+        mute.setOnClickListener {
+            muted = !muted
+            try {
+                audio.isMicrophoneMute = muted
+                mute.text = if (muted) "Unmute" else "Mute"
+            } catch (e: Exception) {
+                muted = !muted
+                Toast.makeText(this, "Mute failed: " + e.message, Toast.LENGTH_LONG).show()
+            }
+        }
+        speaker.setOnClickListener {
+            speakerOn = !speakerOn
+            try {
+                @Suppress("DEPRECATION")
+                run { audio.isSpeakerphoneOn = speakerOn }
+                speaker.text = if (speakerOn) "Earpiece" else "Speaker"
+            } catch (e: Exception) {
+                speakerOn = !speakerOn
+                Toast.makeText(this, "Audio routing failed: " + e.message, Toast.LENGTH_LONG).show()
+            }
+        }
+        findViewById<Button>(R.id.btnEndCall).setOnClickListener {
+            if (recording) {
+                recorder?.stopRecording()
+                recording = false
+            }
+            val call = CustomInCallService.activeCall
+            if (call != null) call.disconnect() else RtpAudioEngine.stopAudio()
+            finish()
+        }
+    }
+
+    private fun setupEffects() {
+        val entries = listOf(
+            Pair(normal, VoiceChanger.Mode.NORMAL),
+            Pair(deep, VoiceChanger.Mode.DEEP_PITCH),
+            Pair(helium, VoiceChanger.Mode.HELIUM_PITCH),
+            Pair(robot, VoiceChanger.Mode.ROBOT),
+            Pair(anon, VoiceChanger.Mode.ANONYMIZER)
+        )
+        for ((button, mode) in entries) {
+            button.setOnClickListener {
+                VoiceChanger.currentMode = mode
+                highlightEffect(mode)
+                Toast.makeText(this, "Selected " + mode.label + " (outgoing VoIP only)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        highlightEffect(VoiceChanger.currentMode)
+    }
+
+    private fun highlightEffect(mode: VoiceChanger.Mode) {
+        val active = ContextCompat.getColor(this, R.color.primary_accent)
+        val inactive = ContextCompat.getColor(this, R.color.dark_surface)
+        val foreground = ContextCompat.getColor(this, R.color.text_primary)
+        val buttons = mapOf(
+            VoiceChanger.Mode.NORMAL to normal,
+            VoiceChanger.Mode.DEEP_PITCH to deep,
+            VoiceChanger.Mode.HELIUM_PITCH to helium,
+            VoiceChanger.Mode.ROBOT to robot,
+            VoiceChanger.Mode.ANONYMIZER to anon
+        )
+        for ((itemMode, button) in buttons) {
+            button.setBackgroundColor(if (itemMode == mode) active else inactive)
+            button.setTextColor(foreground)
+        }
+    }
+
+    private fun refreshMetrics() {
+        val call = CustomInCallService.activeCall
+        val callState = when (call?.state) {
+            Call.STATE_RINGING -> "Carrier call: ringing"
+            Call.STATE_DIALING -> "Carrier call: dialing"
+            Call.STATE_ACTIVE -> "Carrier call: active"
+            Call.STATE_HOLDING -> "Carrier call: held"
+            Call.STATE_DISCONNECTED -> "Carrier call: disconnected"
+            else -> if (RtpAudioEngine.isStreaming) "VoIP media: running" else "No active media stream"
+        }
+        val codec = if (SipDebugManager.selectedCodecPayloadType == 0) "PCMU (G.711u)" else "PCMA (G.711a)"
+        val security = if (RtpAudioEngine.isEncryptedSrtp) "SRTP flag set; encryption is not verified" else "RTP unencrypted"
+        metrics.text = callState + "\nVoice effect: " + VoiceChanger.currentMode.label +
+            "\nCodec setting: " + codec + "\nSecurity: " + security +
+            "\nRTP packets sent: " + RtpAudioEngine.packetsSent
+    }
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!updating) return
+            refreshMetrics()
+            handler.postDelayed(this, 1000)
+        }
+    }
+    override fun onResume() {
+        super.onResume()
+        updating = true
+        handler.post(ticker)
+    }
+    override fun onPause() {
+        updating = false
+        handler.removeCallbacks(ticker)
+        super.onPause()
+    }
+    override fun onDestroy() {
+        if (recording) recorder?.stopRecording()
+        super.onDestroy()
+    }
+}
+''')
+
+# Avoid shipping a hard-coded key as if it were standards-compliant SRTP.
+rtp = base / "rtp/RtpAudioEngine.kt"
+rt = rtp.read_text()
+rt = rt.replace("fun startAudio(remoteIp: String, remoteRtpPort: Int, codecPt: Int, enableSrtp: Boolean = true)",
+                "fun startAudio(remoteIp: String, remoteRtpPort: Int, codecPt: Int, enableSrtp: Boolean = false)")
+rt = rt.replace("var jitterMs = 1.8f", "var jitterMs = 0.0f")
+rt = rt.replace("var packetLossPct = 0.0f", "var packetLossPct = 0.0f")
+rtp.write_text(rt)
