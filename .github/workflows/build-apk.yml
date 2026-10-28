@@ -16,6 +16,13 @@ jobs:
           unzip -oq degoogled-dialer-app-v5.zip -d source
           # Correct the invalid Gradle RepositoriesMode enum used in the source archive.
           find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
+          # Enable AndroidX for the AndroidX dependencies used by the app.
+          if [ -f source/gradle.properties ]; then
+            grep -q '^android.useAndroidX=' source/gradle.properties && sed -i 's/^android.useAndroidX=.*/android.useAndroidX=true/' source/gradle.properties || echo 'android.useAndroidX=true' >> source/gradle.properties
+            grep -q '^android.enableJetifier=' source/gradle.properties || echo 'android.enableJetifier=true' >> source/gradle.properties
+          else
+            printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > source/gradle.properties
+          fi
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
