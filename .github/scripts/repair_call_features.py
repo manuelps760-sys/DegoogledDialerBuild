@@ -143,8 +143,16 @@ if "requestDefaultDialerRole" not in s:
 
 """
     s = s.replace("    override fun onNewIntent(intent: Intent) {", method + "    override fun onNewIntent(intent: Intent) {", 1)
-    # Normalize imports after patching, avoiding duplicate Kotlin imports on rebuilds.
-    main.write_text('\n'.join(dict.fromkeys(s.splitlines())) + '\n')
+    # Deduplicate imports only; preserve repeated braces and statements.
+    lines = []
+    seen_imports = set()
+    for line in s.splitlines():
+        if line.startswith("import "):
+            if line in seen_imports:
+                continue
+            seen_imports.add(line)
+        lines.append(line)
+    main.write_text('\n'.join(lines) + '\n')
 m = manifest.read_text()
 if "CallActionReceiver" not in m:
     m = m.replace("        <!-- Native AOSP Telecom InCallService -->", '        <receiver android:name=".CallActionReceiver" android:exported="false" />\n\n        <!-- Native AOSP Telecom InCallService -->')
@@ -221,7 +229,7 @@ s = s.replace('''        isStreaming = true
         isStreaming = true
         isEncryptedSrtp = false''')
 s = s.replace('''                        val finalPayload = if (enableSrtp) {''', '''                        val finalPayload = if (false) {''')
-rtp.write_text('\n'.join(dict.fromkeys(s.splitlines())) + '\n')
+rtp.write_text(s)
 
 # Parse remote media endpoint from the 200 OK SDP instead of assuming a fixed server port.
 s = sip.read_text()
