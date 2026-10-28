@@ -571,3 +571,59 @@ rtp = base / "rtp/RtpAudioEngine.kt"
 rt = rtp.read_text()
 rt = rt.replace("private var isStreaming = false", "var isStreaming: Boolean = false\n        private set")
 rtp.write_text(rt)
+
+# Fix live VoIP effect routing by matching the RTP socket to the port in SDP.
+sip = base / "sip/SipClient.kt"
+s = sip.read_text()
+s = s.replace('    private var currentCallId = ""', '    private var currentCallId = ""\n    @Volatile private var currentRtpPort = 0')
+s = s.replace('        val rtpPort = 10000 + (100..9000).random()\n        val inviteReq', '        val rtpPort = 20000 + (0..20000).random()\n        currentRtpPort = rtpPort\n        val inviteReq')
+s = s.replace('useTls = SipDebugManager.useTls, useSrtp = SipDebugManager.useSrtp', 'useTls = SipDebugManager.useTls, useSrtp = false')
+s = s.replace('''                // Start Encrypted SRTP / RTP Media Audio Stream
+                RtpAudioEngine.startAudio(sipServer, 10002, SipDebugManager.selectedCodecPayloadType, SipDebugManager.useSrtp)
+                handler.post { onCallConnected?.invoke() }''', '''                val sdp = msg.substringAfter("\\r\\n\\r\\n", "")
+                val remoteIp = Regex("(?m)^c=IN IP4 ([^\\s\\r]+)").find(sdp)?.groupValues?.get(1) ?: sipServer
+                val remotePort = Regex("(?m)^m=audio (\\d+) ").find(sdp)?.groupValues?.get(1)?.toIntOrNull()
+                if (remotePort == null || currentRtpPort == 0) {
+                    notifyStatus("Call answered, but no usable RTP endpoint was found in SDP.")
+                } else {
+                    RtpAudioEngine.startAudio(remoteIp, remotePort, currentRtpPort, SipDebugManager.selectedCodecPayloadType, false)
+                    notifyStatus("VoIP media starting; the selected voice effect is applied to outgoing audio.")
+                }
+                handler.post { onCallConnected?.invoke() }''')
+s = s.replace('''    private fun getLocalIpAddress(): String {
+        return "127.0.0.1"
+    }''', '''    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val network = interfaces.nextElement()
+                if (!network.isUp || network.isLoopback) continue
+                val addresses = network.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (!address.isLoopbackAddress && address is java.net.Inet4Address) return address.hostAddress ?: continue
+                }
+            }
+        } catch (e: Exception) { Log.w("SipClient", "IPv4 discovery failed", e) }
+        return "0.0.0.0"
+    }''')
+sip.write_text(s)
+
+rtp = base / "rtp/RtpAudioEngine.kt"
+r = rtp.read_text()
+r = r.replace('fun startAudio(remoteIp: String, remoteRtpPort: Int, codecPt: Int, enableSrtp: Boolean = true)', 'fun startAudio(remoteIp: String, remoteRtpPort: Int, localRtpPort: Int, codecPt: Int, enableSrtp: Boolean = false)')
+r = r.replace('rtpSocket = DatagramSocket(10000)', 'rtpSocket = DatagramSocket(localRtpPort)')
+r = r.replace('''        if (isStreaming) return
+        isStreaming = true
+        isEncryptedSrtp = enableSrtp''', '''        if (isStreaming) stopAudio()
+        if (enableSrtp) {
+            Log.e("RtpAudioEngine", "SRTP is not implemented safely; refusing fake-key encryption")
+            return
+        }
+        isStreaming = true
+        isEncryptedSrtp = false''')
+r = r.replace('''        isStreaming = false
+        rtpSocket?.close()''', '''        isStreaming = false
+        isEncryptedSrtp = false
+        rtpSocket?.close()''')
+rtp.write_text(r)
