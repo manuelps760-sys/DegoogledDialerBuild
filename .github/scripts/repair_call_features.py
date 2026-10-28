@@ -163,12 +163,22 @@ manifest.write_text(m)
 # Bidirectional RTP: use actual negotiated SDP endpoint and play decoded G.711 received packets.
 s = rtp.read_text()
 s = s.replace('import android.media.AudioRecord\n', 'import android.media.AudioRecord\nimport android.media.AudioTrack\nimport android.media.AudioManager\nimport java.net.InetSocketAddress\n')
+# Keep imports unique; the uploaded source may already import AudioTrack/AudioManager.
+lines = []
+seen_imports = set()
+for line in s.splitlines():
+    if line.startswith('import '):
+        if line in seen_imports:
+            continue
+        seen_imports.add(line)
+    lines.append(line)
+s = '\\n'.join(lines) + '\\n'
 s = s.replace('rtpSocket = DatagramSocket(10000)', 'rtpSocket = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(10000)) }')
 needle = '                audioRecord.startRecording()\n'
 receive = '''
                 // Receive remote RTP on the same bound socket and play decoded G.711 audio.
                 val trackMin = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                val audioTrack = AudioTrack(AudioManager.STREAM_VOICE_CALL, SAMPLE_RATE,
+                val receiveTrack = AudioTrack(AudioManager.STREAM_VOICE_CALL, SAMPLE_RATE,
                     AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
                     maxOf(trackMin, 3200), AudioTrack.MODE_STREAM)
                 audioTrack.play()
@@ -189,7 +199,7 @@ receive = '''
                                 val b = datagram.data[offset + i].toInt() and 0xFF
                                 pcm[i] = if (pt == 8) alawToLinear(b) else ulawToLinear(b)
                             }
-                            audioTrack.write(pcm, 0, pcm.size)
+                            receiveTrack.write(pcm, 0, pcm.size)
                         } catch (e: Exception) {
                             if (isStreaming) Log.w("RtpAudioEngine", "RTP receive ended: ${e.message}")
                         }
