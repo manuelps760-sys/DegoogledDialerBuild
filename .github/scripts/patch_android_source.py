@@ -659,3 +659,78 @@ r = r.replace('''        isStreaming = false
         isEncryptedSrtp = false
         rtpSocket?.close()''')
 rtp.write_text(r)
+
+# Add the receive/playback half of RTP so the user can hear the other caller too.
+rtp = base / "rtp/RtpAudioEngine.kt"
+r = rtp.read_text()
+if 'import android.media.AudioManager' not in r:
+    r = r.replace('import android.media.AudioFormat', 'import android.media.AudioFormat\nimport android.media.AudioManager')
+r = r.replace('''                audioRecord.startRecording()
+
+                val pcmBuffer = ShortArray(160)''', '''                audioRecord.startRecording()
+                val minTrackSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                val audioTrack = AudioTrack(AudioManager.STREAM_VOICE_CALL, SAMPLE_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minTrackSize, 160 * 4), AudioTrack.MODE_STREAM)
+                audioTrack.play()
+
+                val pcmBuffer = ShortArray(160)''')
+r = r.replace('''                var timestamp = 0L
+
+                val cipher''', '''                var timestamp = 0L
+
+                // Receive the remote caller's RTP packets on the same negotiated socket.
+                thread(name = "RTP-Receive") {
+                    val incoming = ByteArray(2048)
+                    while (isStreaming) {
+                        try {
+                            val packet = DatagramPacket(incoming, incoming.size)
+                            rtpSocket?.receive(packet) ?: break
+                            if (packet.length <= 12 || (packet.data[0].toInt() and 0xC0) != 0x80) continue
+                            val headerLength = 12 + (packet.data[0].toInt() and 0x0F) * 4
+                            if (packet.length <= headerLength) continue
+                            val payloadType = packet.data[1].toInt() and 0x7F
+                            if (payloadType != 0 && payloadType != 8) continue
+                            val count = packet.length - headerLength
+                            val decoded = ShortArray(count)
+                            for (i in 0 until count) {
+                                val value = packet.data[headerLength + i].toInt() and 0xFF
+                                decoded[i] = if (payloadType == 0) ulawToLinear(value) else alawToLinear(value)
+                            }
+                            audioTrack.write(decoded, 0, decoded.size)
+                        } catch (e: Exception) {
+                            if (isStreaming) Log.w("RtpAudioEngine", "RTP receive ended: " + e.message)
+                            break
+                        }
+                    }
+                }
+
+                val cipher''')
+r = r.replace('''                audioRecord.stop()
+                audioRecord.release()''', '''                audioRecord.stop()
+                audioRecord.release()
+                try { audioTrack.stop() } catch (_: Exception) {}
+                audioTrack.release()''')
+insert = '''
+    private fun ulawToLinear(value: Int): Short {
+        val u = value.inv() and 0xFF
+        var sample = ((u and 0x0F) shl 3) + 0x84
+        sample = sample shl ((u and 0x70) shr 4)
+        val decoded = if ((u and 0x80) != 0) 0x84 - sample else sample - 0x84
+        return decoded.coerceIn(-32768, 32767).toShort()
+    }
+
+    private fun alawToLinear(value: Int): Short {
+        val a = value xor 0x55
+        var sample = (a and 0x0F) shl 4
+        val segment = (a and 0x70) shr 4
+        sample += if (segment == 0) 8 else 0x108
+        if (segment > 1) sample = sample shl (segment - 1)
+        val decoded = if ((a and 0x80) != 0) sample else -sample
+        return decoded.coerceIn(-32768, 32767).toShort()
+    }
+
+'''
+if 'private fun ulawToLinear' not in r:
+    r = r.replace('    private fun linearToUlaw(pcm: Int): Byte {', insert + '    private fun linearToUlaw(pcm: Int): Byte {')
+rtp.write_text(r)
