@@ -221,7 +221,7 @@ s = s.replace('''        isStreaming = true
         isStreaming = true
         isEncryptedSrtp = false''')
 s = s.replace('''                        val finalPayload = if (enableSrtp) {''', '''                        val finalPayload = if (false) {''')
-rtp.write_text('\\n'.join(dict.fromkeys(s.splitlines()) ) + '\\n')
+rtp.write_text('\n'.join(dict.fromkeys(s.splitlines())) + '\n')
 
 # Parse remote media endpoint from the 200 OK SDP instead of assuming a fixed server port.
 s = sip.read_text()
