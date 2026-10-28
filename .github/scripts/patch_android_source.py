@@ -755,14 +755,96 @@ if missing_media:
     raise SystemExit("VoIP voice changer integration check failed: " + ", ".join(missing_media))
 print("Validated SIP/RTP voice-effects integration markers.")
 
-# Add native Android system-settings shortcuts to the APK without requesting elevated privileges.
-main_text = main.read_text()
-needle = """        findViewById<Button>(R.id.btnLaunchRadioDiag).setOnClickListener {
-            startActivity(Intent(this, RadioDiagnosticsActivity::class.java))
+# Build the device-management and developer pathways inside this degoogled APK.
+# These are app-owned screens; never bounce users into a stock dialer or vendor utility.
+pathways = base / "SystemPathwaysActivity.kt"
+pathways.write_text(r"""package org.degoogled.dialer
+
+import android.app.admin.DevicePolicyManager
+import android.content.Context
+import android.os.Bundle
+import android.provider.Settings
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+
+class SystemPathwaysActivity : AppCompatActivity() {
+    private lateinit var body: LinearLayout
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val scroll = ScrollView(this)
+        body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(36, 28, 36, 36)
         }
-"""
-replacement = needle + """
-        // Native system tools: these open Android-owned screens; they do not silently enable admin rights.
+        scroll.addView(body)
+        setContentView(scroll)
+
+        addText("De-Googled Device Pathways", 24f, true)
+        addText("These controls and diagnostics are part of this APK. Android keeps protected device controls under operating-system enforcement.", 15f)
+        addButton("Return to this APK's dialer") { finish() }
+
+        addSection("Phone / dialer")
+        addText("The dial pad, SIP calling, carrier-call request flow, in-call controls, and voice-effect controls are implemented in this APK. No stock dialer is launched from this pathway.", 15f)
+        addButton("Open this APK's radio/network diagnostics") {
+            startActivity(android.content.Intent(this, RadioDiagnosticsActivity::class.java))
+        }
+
+        addSection("Device administrator / enterprise")
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val admins = try { dpm.activeAdmins?.joinToString("\\n") { it.flattenToShortString() } ?: "No active administrators reported" }
+            catch (_: Exception) { "Android restricted the administrator list" }
+        addText("Active administrator components reported by Android:\\n" + admins, 14f)
+        addText("This APK does not silently grant itself administrator or device-owner privileges. Those privileges require an explicitly declared admin receiver and user/management approval; this screen reports what Android exposes instead of pretending the privilege was granted.", 14f)
+
+        addSection("Developer / debugging status")
+        val devEnabled = readGlobal(Settings.Global.DEVELOPMENT_SETTINGS_ENABLED)
+        val adbEnabled = readGlobal(Settings.Global.ADB_ENABLED)
+        val oemUnlock = readGlobal(Settings.Global.OEM_UNLOCK_ENABLED)
+        addText("Developer options: " + status(devEnabled) + "\\nUSB debugging setting: " + status(adbEnabled) + "\\nOEM unlock setting: " + status(oemUnlock), 15f)
+        addText("These are read-only status checks. An ordinary app cannot turn on USB debugging, bypass device policy, unlock the bootloader, or generate privileged bug reports by itself.", 14f)
+        addButton("Refresh Android-reported status") { recreate() }
+    }
+
+    private fun readGlobal(key: String): Int? = try {
+        Settings.Global.getInt(contentResolver, key)
+    } catch (_: Exception) { null }
+
+    private fun status(value: Int?): String = when (value) {
+        1 -> "Enabled"
+        0 -> "Disabled"
+        else -> "Unavailable / restricted"
+    }
+
+    private fun addSection(text: String) {
+        addText(text, 19f, true)
+    }
+
+    private fun addText(text: String, size: Float, bold: Boolean = false) {
+        body.addView(TextView(this).apply {
+            this.text = text
+            textSize = size
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, 10, 0, 10)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun addButton(text: String, action: () -> Unit) {
+        body.addView(Button(this).apply {
+            this.text = text
+            setOnClickListener { action() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+}
+""")
+
+# Replace the previous external-app shortcuts with one in-app pathway entry.
+main_text = main.read_text()
+old = """        // Native system tools: these open Android-owned screens; they do not silently enable admin rights.
         val systemTools = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(12, 8, 12, 8)
@@ -804,9 +886,26 @@ replacement = needle + """
         val contentRoot = findViewById<android.view.ViewGroup>(android.R.id.content)
         contentRoot.addView(systemTools)
 """
-if needle not in main_text:
-    raise SystemExit("System tools integration failed: expected MainActivity insertion point not found.")
-if "Native Android Developer Options" not in main_text:
-    main.write_text(main_text.replace(needle, replacement, 1))
-print("Added Phone, Device Admin, and native Developer Options shortcuts.")
+new = """        // In-app pathways: do not delegate the phone UI to a preinstalled dialer or vendor app.
+        val pathwaysButton = Button(this).apply {
+            text = "Device Admin / Developer Pathways"
+            setOnClickListener { startActivity(Intent(this@MainActivity, SystemPathwaysActivity::class.java)) }
+        }
+        findViewById<android.view.ViewGroup>(android.R.id.content).addView(pathwaysButton)
+"""
+if (!main_text.includes(old)) throw new Error("Could not locate old external-app shortcut block in generated MainActivity");
+main.write_text(main_text.replace(old, new, 1));
 
+# Register the app-owned pathway screen in AndroidManifest.xml.
+m = manifest.read_text()
+activity = '        <activity android:name=".SystemPathwaysActivity" android:exported="false" />'
+if (!m.includes('android:name=".SystemPathwaysActivity"')) {
+  const anchor = '        <application'
+  const appIdx = m.indexOf(anchor)
+  if (appIdx < 0) throw new Error("Could not find manifest application element")
+  // Insert after the application opening tag so this remains an app-owned, non-exported activity.
+  const end = m.indexOf('>', appIdx)
+  m = m.slice(0, end + 1) + "\n" + activity + m.slice(end + 1)
+  manifest.write_text(m)
+}
+print("Added app-owned Device Admin / Developer Pathways screen; removed stock dialer and settings-app shortcuts.")
