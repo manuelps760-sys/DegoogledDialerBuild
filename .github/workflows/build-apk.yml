@@ -3,98 +3,35 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+
 permissions:
   contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Extract and patch Android source
+
+      - name: Extract uploaded Android source ZIP
+        run: unzip -oq degoogled-dialer-app-v5.zip -d source
+
+      - name: Patch and validate source
         run: |
-          unzip -oq degoogled-dialer-app-v5.zip -d source
-          # Fix Kotlin compile errors in the supplied source archive.
-          sed -i 's/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled, SipDebugManager.tlsEnabled)/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)/' source/app/src/main/java/org/degoogled/dialer/MainActivity.kt
-          sed -i 's/# Default SIPS over TLS/\/\/ Default SIPS over TLS/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
-          sed -i 's/# Default Secure RTP payload encryption/\/\/ Default Secure RTP payload encryption/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
-          # Apply functional and privacy fixes to the uploaded source before compiling.
-          python3 - <<'PY'
-          from pathlib import Path
-          base = Path("source/app/src/main/java/org/degoogled/dialer")
-          p = base / "SipDebugManager.kt"
-          s = p.read_text()
-          s = s.replace("var pcapEnabled: Boolean = true", "var pcapEnabled: Boolean = false")
-          p.write_text(s)
-
-          p = base / "sip/SipClient.kt"
-          s = p.read_text()
-          s = s.replace('var sipServer: String = "192.168.1.100"', 'var sipServer: String = ""')
-          s = s.replace('var sipUser: String = "101"', 'var sipUser: String = ""')
-          s = s.replace('var sipPass: String = "secret123"', 'var sipPass: String = ""')
-          s = s.replace('''    private fun getLocalIpAddress(): String {
-                  return "127.0.0.1"
-              }''', '''    private fun getLocalIpAddress(): String {
-                  // Never advertise loopback to a remote SIP server. Choose an active non-loopback IPv4.
-                  return try {
-                      java.net.NetworkInterface.getNetworkInterfaces().toList()
-                          .asSequence()
-                          .filter { it.isUp && !it.isLoopback }
-                          .flatMap { it.inetAddresses.toList().asSequence() }
-                          .filterIsInstance<java.net.Inet4Address>()
-                          .map { it.hostAddress }
-                          .firstOrNull { !it.isNullOrBlank() }
-                          ?: "0.0.0.0"
-                  } catch (_: Exception) {
-                      "0.0.0.0"
-                  }
-              }''')
-          p.write_text(s)
-
-          p = base / "MainActivity.kt"
-          s = p.read_text()
-          s = s.replace('''            val server = etSipServer.text.toString()
-                      val user = etSipUser.text.toString()
-                      val pass = etSipPass.text.toString()
-
-                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''', '''            val server = etSipServer.text.toString().trim()
-                      val user = etSipUser.text.toString().trim()
-                      val pass = etSipPass.text.toString()
-
-                      if (server.isBlank() || user.isBlank() || pass.isBlank()) {
-                          Toast.makeText(this, "Enter your SIP server, username, and password first.", Toast.LENGTH_LONG).show()
-                          return@setOnClickListener
-                      }
-                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''')
-          s = s.replace('''            Toast.makeText(this, "IMEI: 869403049182301 / 869403049182302", Toast.LENGTH_LONG).show()''',
-                        '''            Toast.makeText(this, "For device identifiers, open Android Settings → About phone. This app does not invent or expose IMEI values.", Toast.LENGTH_LONG).show()''')
-          p.write_text(s)
-          PY
-          # Correct the invalid Gradle RepositoriesMode enum used in the source archive.
+          python3 .github/scripts/patch_android_source.py source
           find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
-          # Enable AndroidX for the AndroidX dependencies used by the app.
-          if [ -f source/gradle.properties ]; then
-            grep -q '^android.useAndroidX=' source/gradle.properties && sed -i 's/^android.useAndroidX=.*/android.useAndroidX=true/' source/gradle.properties || echo 'android.useAndroidX=true' >> source/gradle.properties
-            grep -q '^android.enableJetifier=' source/gradle.properties || echo 'android.enableJetifier=true' >> source/gradle.properties
-          else
-            printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > source/gradle.properties
-          fi
-          # Supply minimal resources referenced by the manifest if the archive omitted them.
-          appdir="$(find source -type f -name AndroidManifest.xml -path '*/app/src/main/*' -print -quit | sed 's#/src/main/AndroidManifest.xml##')"
-          if [ -n "$appdir" ]; then
-            res="$appdir/src/main/res"
-            mkdir -p "$res/mipmap-anydpi" "$res/values"
-            if ! find "$res" -type f \( -name 'ic_launcher.png' -o -name 'ic_launcher.xml' -o -name 'ic_launcher.webp' \) | grep -q .; then
-              cat > "$res/mipmap-anydpi/ic_launcher.xml" <<'XML'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
-              <path android:fillColor="#2457C5" android:pathData="M0,0h48v48h-48z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M15,7h18a3,3 0,0 1,3 3v28a3,3 0,0 1,-3 3h-18a3,3 0,0 1,-3 -3v-28a3,3 0,0 1,3 -3z M17,12v24h14v-24z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M20,17h8v3h-8z M20,23h8v3h-8z M20,29h8v3h-8z"/>
-          </vector>
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\n' > source/gradle.properties
+          appdir=source/app
+          mkdir -p "$appdir/src/main/res/values" "$appdir/src/main/res/mipmap-anydpi"
+          cat > "$appdir/src/main/res/values/build-fallback-colors.xml" <<'XML'
+          <resources>
+              <color name="white">#FFFFFFFF</color>
+              <color name="call_green">#FF2EAD62</color>
+          </resources>
           XML
-            fi
-            if ! grep -Rqs 'name="AppTheme"' "$res/values" 2>/dev/null; then
-              cat > "$res/values/styles.xml" <<'XML'
+          if ! grep -Rqs 'name="AppTheme"' "$appdir/src/main/res/values"; then
+            cat > "$appdir/src/main/res/values/build-fallback-styles.xml" <<'XML'
           <resources>
               <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
                   <item name="colorPrimary">#2457C5</item>
@@ -104,255 +41,36 @@ jobs:
               </style>
           </resources>
           XML
-            fi
           fi
-          # Add color resources referenced by layouts if the source archive omitted them.
-          if [ -n "$appdir" ]; then
-            mkdir -p "$appdir/src/main/res/values"
-            cat > "$appdir/src/main/res/values/build-fallback-colors.xml" <<'XML'
-          <resources>
-              <color name="white">#FFFFFFFF</color>
-              <color name="call_green">#FF2EAD62</color>
-          </resources>
+          if ! find "$appdir/src/main/res" -type f \( -name 'ic_launcher.png' -o -name 'ic_launcher.xml' -o -name 'ic_launcher.webp' \) | grep -q .; then
+            cat > "$appdir/src/main/res/mipmap-anydpi/ic_launcher.xml" <<'XML'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+              <path android:fillColor="#2457C5" android:pathData="M0,0h48v48h-48z"/>
+              <path android:fillColor="#FFFFFF" android:pathData="M15,7h18a3,3 0,0 1,3 3v28a3,3 0,0 1,-3 3h-18a3,3 0,0 1,-3 -3v-28a3,3 0,0 1,3 -3z M17,12v24h14v-24z"/>
+          </vector>
           XML
           fi
-          # Improve the app source after extracting the uploaded v5 ZIP.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("source/app/src/main/java/org/degoogled/dialer/MainActivity.kt")
-          s = p.read_text()
-          s = s.replace("import android.content.Intent", "import android.Manifest\nimport android.content.Intent\nimport android.content.pm.PackageManager\nimport android.net.Uri")
-          s = s.replace("    private var sipClient: SipClient? = null", "    private var sipClient: SipClient? = null\n    private var sipRegistered = false\n    private var pendingCellularNumber: String? = null")
-          s = s.replace("        etDisplay = findViewById(R.id.etNumberDisplay)", "        etDisplay = findViewById(R.id.etNumberDisplay)\n        if (intent?.action == Intent.ACTION_DIAL) intent.data?.schemeSpecificPart?.let { etDisplay.setText(it) }")
-          s = s.replace('''                tvSipStatus.text = "Status: $status"''', '''                tvSipStatus.text = "Status: $status"\n                sipRegistered = status.startsWith("Registered")''')
-          s = s.replace('''            val server = etSipServer.text.toString()
-                      val user = etSipUser.text.toString()
-                      val pass = etSipPass.text.toString()
 
-                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''', '''            val server = etSipServer.text.toString().trim()
-                      val user = etSipUser.text.toString().trim()
-                      val pass = etSipPass.text.toString()
-                      if (server.isBlank() || user.isBlank() || pass.isBlank()) {
-                          Toast.makeText(this, "Enter your SIP server, username, and password first.", Toast.LENGTH_LONG).show()
-                          return@setOnClickListener
-                      }
-                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''')
-          s = s.replace('''            sipClient?.makeCall(target, SipDebugManager.selectedCodecPayloadType)''', '''            if (sipRegistered) {
-                          sipClient?.makeCall(target, SipDebugManager.selectedCodecPayloadType)
-                      } else {
-                          pendingCellularNumber = target
-                          if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                              placeCellularCall(target)
-                          } else {
-                              requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), 702)
-                          }
-                      }''')
-          s = s.replace('''            Toast.makeText(this, "IMEI: 869403049182301 / 869403049182302", Toast.LENGTH_LONG).show()''', '''            Toast.makeText(this, "Open Android Settings → About phone for your real device identifier. This app does not invent IMEI values.", Toast.LENGTH_LONG).show()''')
-          insert = '''
-          private fun placeCellularCall(number: String) {
-              try {
-                  startActivity(Intent(Intent.ACTION_CALL, Uri.fromParts("tel", number, null)))
-              } catch (_: Exception) {
-                  Toast.makeText(this, "Could not start a cellular call. Check call permission and your phone service.", Toast.LENGTH_LONG).show()
-              }
-              pendingCellularNumber = null
-          }
-
-          @Deprecated("Deprecated API retained for device compatibility")
-          override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-              super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-              if (requestCode == 702) {
-                  val number = pendingCellularNumber
-                  if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED && !number.isNullOrBlank()) {
-                      placeCellularCall(number)
-                  } else {
-                      Toast.makeText(this, "Call permission was not granted.", Toast.LENGTH_LONG).show()
-                  }
-              }
-          }
-
-          '''
-          s = s.replace("    private fun setupKeypad() {", insert + "    private fun setupKeypad() {")
-          p.write_text(s)
-          p = Path("source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt")
-          s = p.read_text().replace("var pcapEnabled: Boolean = true", "var pcapEnabled: Boolean = false")
-          s = s.replace("# Default SIPS over TLS", "// Default SIPS over TLS").replace("# Default Secure RTP payload encryption", "// SRTP is experimental; do not enable by default")
-          s = s.replace("var useSrtp: Boolean = true", "var useSrtp: Boolean = false")
-          p.write_text(s)
-          p = Path("source/app/src/main/java/org/degoogled/dialer/sip/SipClient.kt")
-          s = p.read_text().replace('var sipServer: String = "192.168.1.100"', 'var sipServer: String = ""').replace('var sipUser: String = "101"', 'var sipUser: String = ""').replace('var sipPass: String = "secret123"', 'var sipPass: String = ""')
-          s = s.replace("import java.net.InetAddress", "import java.net.InetAddress\nimport java.net.Inet4Address\nimport java.net.NetworkInterface")
-          s = s.replace('''    private fun getLocalIpAddress(): String {
-                  return "127.0.0.1"
-              }''', '''    private fun getLocalIpAddress(): String {
-                  return try {
-                      val interfaces = NetworkInterface.getNetworkInterfaces()
-                      while (interfaces.hasMoreElements()) {
-                          val iface = interfaces.nextElement()
-                          if (!iface.isUp || iface.isLoopback) continue
-                          val addresses = iface.inetAddresses
-                          while (addresses.hasMoreElements()) {
-                              val address = addresses.nextElement()
-                              if (address is Inet4Address && !address.isLoopbackAddress && !address.isLinkLocalAddress) {
-                                  return address.hostAddress ?: "0.0.0.0"
-                              }
-                          }
-                      }
-                      "0.0.0.0"
-                  } catch (_: Exception) { "0.0.0.0" }
-              }''')
-          p.write_text(s)
-          PY
-      - name: Add real Android dialer role and Telecom declarations
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          manifest = Path("source/app/src/main/AndroidManifest.xml")
-          s = manifest.read_text()
-          # A default dialer must handle ACTION_DIAL with tel: URIs and expose an InCallService.
-          s = s.replace('''                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>''', '''                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="tel" />
-            </intent-filter>''', 1)
-          service = '''        <service
-            android:name=".CustomInCallService"
-            android:permission="android.permission.BIND_INCALL_SERVICE"
-            android:exported="true">
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
-            <intent-filter>
-                <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-        </service>'''
-          s = re.sub(r'        <service\s+android:name="\.CustomInCallService".*?</service>', service, s, flags=re.S)
-          manifest.write_text(s)
-
-          main = Path("source/app/src/main/java/org/degoogled/dialer/MainActivity.kt")
-          s = main.read_text()
-          if "import android.app.role.RoleManager" not in s:
-              s = s.replace("import android.content.Intent", "import android.app.role.RoleManager\nimport android.content.Intent\nimport android.os.Build")
-          if "requestDialerRoleIfNeeded()" not in s:
-              s = s.replace("        setContentView(R.layout.activity_main)", "        setContentView(R.layout.activity_main)\n        requestDialerRoleIfNeeded()")
-              method = '''
-          private fun requestDialerRoleIfNeeded() {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                  val roleManager = getSystemService(RoleManager::class.java) ?: return
-                  if (roleManager.isRoleAvailable(RoleManager.ROLE_DIALER) &&
-                      !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
-                      startActivityForResult(
-                          roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER),
-                          703
-                      )
-                  }
-              }
-          }
-
-          '''
-              s = s.replace("    private fun setupKeypad() {", method + "    private fun setupKeypad() {")
-          main.write_text(s)
-          PY
-          # Replace fake radio readings with information Android actually reports.
-          python3 - <<'PY'
-          from pathlib import Path
-          radio = Path("source/app/src/main/java/org/degoogled/dialer/RadioDiagnosticsActivity.kt")
-          radio.write_text("""package org.degoogled.dialer
-
-          import android.content.Context
-          import android.net.ConnectivityManager
-          import android.net.NetworkCapabilities
-          import android.os.Bundle
-          import android.telephony.TelephonyManager
-          import android.widget.Button
-          import android.widget.TextView
-          import androidx.appcompat.app.AppCompatActivity
-
-          class RadioDiagnosticsActivity : AppCompatActivity() {
-              private lateinit var tvMetrics: TextView
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_radio_diagnostics)
-                  tvMetrics = findViewById(R.id.tvRadioMetrics)
-                  findViewById<Button>(R.id.btnRefreshMetrics).setOnClickListener { refreshMetrics() }
-                  refreshMetrics()
-              }
-
-              @Suppress("DEPRECATION")
-              private fun refreshMetrics() {
-                  val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                  val network = cm.activeNetwork
-                  val caps = if (network != null) cm.getNetworkCapabilities(network) else null
-                  val transport = when {
-                      caps == null -> "No active network"
-                      caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-                      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular data"
-                      caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
-                      caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
-                      else -> "Other / unknown"
-                  }
-                  val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-                  val carrier = try {
-                      val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-                      tm.networkOperatorName.takeIf { it.isNotBlank() } ?: "Unavailable"
-                  } catch (_: SecurityException) { "Restricted by Android" }
-                    catch (_: Exception) { "Unavailable" }
-
-                  tvMetrics.text = "=== Device Network Diagnostics ===\n" +
-                      "Android: " + android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")\n" +
-                      "Active connection: " + transport + "\n" +
-                      "Internet validated: " + if (validated) "Yes" else "No / unknown" + "\n" +
-                      "Carrier name: " + carrier + "\n\n" +
-                      "Accurate signal strength, cell ID, VoLTE, and IMS details are not available to every ordinary app. " +
-                      "This screen reports only system information available to this app. It does not fabricate readings, " +
-                      "claim to disable 2G, or claim to block IMSI catchers."
-              }
-          }
-          """)
-          PY
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.6'
-      - name: Use Android SDK installed on runner
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          test -d "$ANDROID_HOME"
+
       - name: Build debug APK
-        shell: bash
         run: |
-          set -e
-          wrapper="$(find source -type f -name gradlew -print -quit)"
-          if [ -n "$wrapper" ]; then
-            project_dir="$(dirname "$wrapper")"
-            cd "$project_dir"
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          else
-            build_file="$(find source -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit)"
-            if [ -z "$build_file" ]; then
-              echo "No Gradle build files found in degoogled-dialer-app-v5.zip"
-              exit 1
-            fi
-            cd "$(dirname "$build_file")"
-            gradle --no-daemon assembleDebug
-          fi
+          cd source
+          gradle --no-daemon assembleDebug
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: DegoogledDialer-debug-apk
-          path: '**/build/outputs/apk/debug/*.apk'
+          path: source/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
