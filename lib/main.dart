@@ -333,7 +333,7 @@ class _DialerHomeState extends State<DialerHome> {
             : 'SIP call ended.';
       } else {
         activeSipCall = call;
-        sipIncoming = call.direction == Direction.INCOMING &&
+        sipIncoming = call.direction == Direction.incoming &&
             state.state != CallStateEnum.CONFIRMED &&
             state.state != CallStateEnum.ACCEPTED &&
             state.state != CallStateEnum.STREAM;
