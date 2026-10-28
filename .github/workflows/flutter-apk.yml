@@ -1,0 +1,29 @@
+name: Flutter Android APK
+on:
+  push:
+    branches: [flutter-rebuild]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.5"
+          cache: true
+      - name: Verify Flutter project
+        run: flutter pub get
+      - name: Analyze Dart
+        run: flutter analyze --no-pub
+      - name: Build debug APK
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DegoogledDialer-Flutter-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
