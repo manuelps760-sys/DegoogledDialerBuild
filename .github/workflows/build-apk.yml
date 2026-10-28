@@ -18,6 +18,58 @@ jobs:
           sed -i 's/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled, SipDebugManager.tlsEnabled)/sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)/' source/app/src/main/java/org/degoogled/dialer/MainActivity.kt
           sed -i 's/# Default SIPS over TLS/\/\/ Default SIPS over TLS/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
           sed -i 's/# Default Secure RTP payload encryption/\/\/ Default Secure RTP payload encryption/' source/app/src/main/java/org/degoogled/dialer/SipDebugManager.kt
+          # Apply functional and privacy fixes to the uploaded source before compiling.
+          python3 - <<'PY'
+          from pathlib import Path
+          base = Path("source/app/src/main/java/org/degoogled/dialer")
+          p = base / "SipDebugManager.kt"
+          s = p.read_text()
+          s = s.replace("var pcapEnabled: Boolean = true", "var pcapEnabled: Boolean = false")
+          p.write_text(s)
+
+          p = base / "sip/SipClient.kt"
+          s = p.read_text()
+          s = s.replace('var sipServer: String = "192.168.1.100"', 'var sipServer: String = ""')
+          s = s.replace('var sipUser: String = "101"', 'var sipUser: String = ""')
+          s = s.replace('var sipPass: String = "secret123"', 'var sipPass: String = ""')
+          s = s.replace('''    private fun getLocalIpAddress(): String {
+                  return "127.0.0.1"
+              }''', '''    private fun getLocalIpAddress(): String {
+                  // Never advertise loopback to a remote SIP server. Choose an active non-loopback IPv4.
+                  return try {
+                      java.net.NetworkInterface.getNetworkInterfaces().toList()
+                          .asSequence()
+                          .filter { it.isUp && !it.isLoopback }
+                          .flatMap { it.inetAddresses.toList().asSequence() }
+                          .filterIsInstance<java.net.Inet4Address>()
+                          .map { it.hostAddress }
+                          .firstOrNull { !it.isNullOrBlank() }
+                          ?: "0.0.0.0"
+                  } catch (_: Exception) {
+                      "0.0.0.0"
+                  }
+              }''')
+          p.write_text(s)
+
+          p = base / "MainActivity.kt"
+          s = p.read_text()
+          s = s.replace('''            val server = etSipServer.text.toString()
+                      val user = etSipUser.text.toString()
+                      val pass = etSipPass.text.toString()
+
+                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''', '''            val server = etSipServer.text.toString().trim()
+                      val user = etSipUser.text.toString().trim()
+                      val pass = etSipPass.text.toString()
+
+                      if (server.isBlank() || user.isBlank() || pass.isBlank()) {
+                          Toast.makeText(this, "Enter your SIP server, username, and password first.", Toast.LENGTH_LONG).show()
+                          return@setOnClickListener
+                      }
+                      sipClient?.startClient(server, user, pass, SipDebugManager.pcapEnabled)''')
+          s = s.replace('''            Toast.makeText(this, "IMEI: 869403049182301 / 869403049182302", Toast.LENGTH_LONG).show()''',
+                        '''            Toast.makeText(this, "For device identifiers, open Android Settings → About phone. This app does not invent or expose IMEI values.", Toast.LENGTH_LONG).show()''')
+          p.write_text(s)
+          PY
           # Correct the invalid Gradle RepositoriesMode enum used in the source archive.
           find source -type f -name '*.gradle.kts' -exec sed -i 's/RepositoriesMode\.FAIL_ON_PROJECT_REPOSITORIES/RepositoriesMode.FAIL_ON_PROJECT_REPOS/g' {} +
           # Enable AndroidX for the AndroidX dependencies used by the app.
