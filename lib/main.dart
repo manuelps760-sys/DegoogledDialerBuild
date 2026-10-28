@@ -69,12 +69,12 @@ class _DialerHomeState extends State<DialerHome> {
           selectedAccountId = accounts.isEmpty ? null : accounts.first['id'] as String?;
         }
         loadingAccounts = false;
-      });
+      }); }
     } on PlatformException catch (e) {
-      if (mounted) setState(() {
+      if (mounted) { setState(() {
         loadingAccounts = false;
         status = 'Could not read SIM accounts: ${e.message ?? e.code}';
-      });
+      }); }
     }
   }
 
