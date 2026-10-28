@@ -754,3 +754,59 @@ missing_media = [label for label, marker in required_media_markers.items() if ma
 if missing_media:
     raise SystemExit("VoIP voice changer integration check failed: " + ", ".join(missing_media))
 print("Validated SIP/RTP voice-effects integration markers.")
+
+# Add native Android system-settings shortcuts to the APK without requesting elevated privileges.
+main_text = main.read_text()
+needle = """        findViewById<Button>(R.id.btnLaunchRadioDiag).setOnClickListener {
+            startActivity(Intent(this, RadioDiagnosticsActivity::class.java))
+        }
+"""
+replacement = needle + """
+        // Native system tools: these open Android-owned screens; they do not silently enable admin rights.
+        val systemTools = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(12, 8, 12, 8)
+        }
+        fun addSystemTool(label: String, action: () -> Unit) {
+            val button = Button(this).apply {
+                text = label
+                setOnClickListener { action() }
+            }
+            systemTools.addView(button, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        addSystemTool("Open Phone / Dialer") {
+            try {
+                startActivity(Intent(Intent.ACTION_DIAL))
+            } catch (_: Exception) {
+                Toast.makeText(this, "No dialer app is available.", Toast.LENGTH_LONG).show()
+            }
+        }
+        addSystemTool("Device Admin / Enterprise Settings") {
+            try {
+                startActivity(Intent("android.settings.DEVICE_ADMIN_SETTINGS"))
+            } catch (_: Exception) {
+                try { startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) }
+                catch (_: Exception) {
+                    Toast.makeText(this, "Device administration settings are unavailable on this device.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        addSystemTool("Native Android Developer Options") {
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+            } catch (_: Exception) {
+                Toast.makeText(this, "Developer Options is unavailable or restricted by device policy.", Toast.LENGTH_LONG).show()
+            }
+        }
+        val contentRoot = findViewById<android.view.ViewGroup>(android.R.id.content)
+        contentRoot.addView(systemTools)
+"""
+if needle not in main_text:
+    raise SystemExit("System tools integration failed: expected MainActivity insertion point not found.")
+if "Native Android Developer Options" not in main_text:
+    main.write_text(main_text.replace(needle, replacement, 1))
+print("Added Phone, Device Admin, and native Developer Options shortcuts.")
+
