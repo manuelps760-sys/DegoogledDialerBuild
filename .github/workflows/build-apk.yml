@@ -258,6 +258,64 @@ jobs:
               s = s.replace("    private fun setupKeypad() {", method + "    private fun setupKeypad() {")
           main.write_text(s)
           PY
+          # Replace fake radio readings with information Android actually reports.
+          python3 - <<'PY'
+          from pathlib import Path
+          radio = Path("source/app/src/main/java/org/degoogled/dialer/RadioDiagnosticsActivity.kt")
+          radio.write_text("""package org.degoogled.dialer
+
+          import android.content.Context
+          import android.net.ConnectivityManager
+          import android.net.NetworkCapabilities
+          import android.os.Bundle
+          import android.telephony.TelephonyManager
+          import android.widget.Button
+          import android.widget.TextView
+          import androidx.appcompat.app.AppCompatActivity
+
+          class RadioDiagnosticsActivity : AppCompatActivity() {
+              private lateinit var tvMetrics: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_radio_diagnostics)
+                  tvMetrics = findViewById(R.id.tvRadioMetrics)
+                  findViewById<Button>(R.id.btnRefreshMetrics).setOnClickListener { refreshMetrics() }
+                  refreshMetrics()
+              }
+
+              @Suppress("DEPRECATION")
+              private fun refreshMetrics() {
+                  val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                  val network = cm.activeNetwork
+                  val caps = if (network != null) cm.getNetworkCapabilities(network) else null
+                  val transport = when {
+                      caps == null -> "No active network"
+                      caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular data"
+                      caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                      caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+                      else -> "Other / unknown"
+                  }
+                  val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                  val carrier = try {
+                      val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                      tm.networkOperatorName.takeIf { it.isNotBlank() } ?: "Unavailable"
+                  } catch (_: SecurityException) { "Restricted by Android" }
+                    catch (_: Exception) { "Unavailable" }
+
+                  tvMetrics.text = "=== Device Network Diagnostics ===\n" +
+                      "Android: " + android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")\n" +
+                      "Active connection: " + transport + "\n" +
+                      "Internet validated: " + if (validated) "Yes" else "No / unknown" + "\n" +
+                      "Carrier name: " + carrier + "\n\n" +
+                      "Accurate signal strength, cell ID, VoLTE, and IMS details are not available to every ordinary app. " +
+                      "This screen reports only system information available to this app. It does not fabricate readings, " +
+                      "claim to disable 2G, or claim to block IMSI catchers."
+              }
+          }
+          """)
+          PY
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
