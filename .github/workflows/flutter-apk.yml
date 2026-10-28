@@ -15,6 +15,10 @@ jobs:
           channel: stable
           flutter-version: "3.24.5"
           cache: true
+      - name: Generate Android wrapper and local Flutter configuration
+        run: |
+          flutter create --platforms=android --project-name degoogled_dialer --org org.degoogled --no-pub .
+          printf "flutter.sdk=%s\\n" "$FLUTTER_ROOT" > android/local.properties
       - name: Verify Flutter project
         run: flutter pub get
       - name: Analyze Dart
