@@ -65,6 +65,10 @@ class MainActivity : AppCompatActivity() {
         etSipUser = findViewById(R.id.etSipUser)
         etSipPass = findViewById(R.id.etSipPass)
         tvSipStatus = findViewById(R.id.tvSipStatus)
+        // Local-server defaults for the Android-hosted Asterisk test setup.
+        etSipServer.setText("127.0.0.1")
+        etSipUser.setText("1001")
+        // Never hardcode the SIP password in this public repository or APK.
         handleDialIntent(intent)
 
         sipClient = SipClient(this).apply {
