@@ -44,14 +44,23 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 cp -a "$PJSIP" "$PJSIP.backup.$STAMP"
 cp -a "$DIALPLAN" "$DIALPLAN.backup.$STAMP"
 
-cat >> "$PJSIP" <<EOF
+# Reuse an existing transport bound to UDP 5060 when one is configured.
+# Otherwise create the PhoneSuite transport. Avoid binding the same port twice.
+if ! grep -E '^[[:space:]]*bind[[:space:]]*=[^;]*:5060([[:space:]]|$)' "$PJSIP" >/dev/null 2>&1; then
+  cat >> "$PJSIP" <<'TRANSPORT'
 
-$MARKER
+; BEGIN PHONESUITE SIP TRANSPORT
 [transport-phonesuite]
 type=transport
 protocol=udp
 bind=0.0.0.0:5060
+; END PHONESUITE SIP TRANSPORT
+TRANSPORT
+fi
 
+cat >> "$PJSIP" <<EOF
+
+$MARKER
 [1001]
 type=endpoint
 context=phonesuite-internal
