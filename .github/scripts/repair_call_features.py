@@ -11,6 +11,15 @@ sip = base / "sip/SipClient.kt"
 if not all(p.exists() for p in (manifest, main, svc, rtp, sip)):
     raise SystemExit("Call feature patch: unexpected source layout")
 
+# Some source ZIP exports contain this Kotlin file as one escaped line instead of
+# real source lines. Normalize only that unmistakable serialization failure before
+# applying the media patches below.
+_rtp_text = rtp.read_text()
+if _rtp_text.count("\\n") > 20 and _rtp_text.count("\n") < 3:
+    _rtp_text = _rtp_text.replace("\\n", "\n")
+    _rtp_text = _rtp_text.replace("\\r", "\r")
+    rtp.write_text(_rtp_text)
+
 svc.write_text(r'''package org.degoogled.dialer
 import android.app.Notification
 import android.app.NotificationChannel
