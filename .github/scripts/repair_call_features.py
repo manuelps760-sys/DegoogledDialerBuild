@@ -181,7 +181,7 @@ for line in s.splitlines():
             continue
         seen_imports.add(line)
     lines.append(line)
-s = '\\n'.join(lines) + '\\n'
+s = '\n'.join(lines) + '\n'
 s = s.replace('rtpSocket = DatagramSocket(10000)', 'rtpSocket = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(10000)) }')
 needle = '                audioRecord.startRecording()\n'
 receive = '''
